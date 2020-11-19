@@ -11,7 +11,7 @@
   Main routines are ConvertFloat64ToFloat80 and ConvertFloat80ToFloat64, others
   are here only as an infrastructure for them.
 }
-unit Float80; 
+unit Float80Utils; 
 {
   Float80_PurePascal
 
