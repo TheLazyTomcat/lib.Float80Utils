@@ -11,8 +11,7 @@
   Main routines are ConvertFloat64ToFloat80 and ConvertFloat80ToFloat64, others
   are here only as an infrastructure for them.
 }
-unit Float80;
-{$DEFINE Float80_PurePascal}{$message 'remove'}
+unit Float80; 
 {
   Float80_PurePascal
 
@@ -21,6 +20,7 @@ unit Float80;
   cannot make changes to this unit, define this symbol for the entire project
   and this unit will be compiled in PurePascal mode.
 }
+{$DEFINE Float80_PurePascal}
 {$IFDEF Float80_PurePascal}
   {$DEFINE PurePascal}
 {$ENDIF}
@@ -303,34 +303,48 @@ procedure RaiseX87Exceptions;
 
 procedure Float64ToFloat80(Float64Ptr,Float80Ptr: Pointer); overload;{$IFNDEF PurePascal} register; assembler;{$ENDIF}
 
-Function Float64ToFloat80(Value: Float64): Auxtypes.Float80; overload;
+Function Float64ToFloat80(Value: Float64): AuxTypes.Float80; overload;
 
 //------------------------------------------------------------------------------
 
 procedure Float80ToFloat64(Float80Ptr,Float64Ptr: Pointer); overload;{$IFNDEF PurePascal} register; assembler;{$ENDIF}
 
-Function Float80ToFloat64(Value: Auxtypes.Float80): Float64; overload;
+Function Float80ToFloat64(Value: AuxTypes.Float80): Float64; overload;
+
+{===============================================================================
+--------------------------------------------------------------------------------
+                         Float80 utilities
+--------------------------------------------------------------------------------
+===============================================================================}
 
 implementation
+
+{$IFDEF FPC_DisableWarns}
+  {$DEFINE FPCDWM}
+  {$DEFINE W4055:={$WARN 4055 OFF}}   // Conversion between ordinals and pointers is not portable
+{$ENDIF}
 
 {===============================================================================
     Internal constants and types
 ===============================================================================}
-
 const
   F64_MASK_SIGN = UInt64($8000000000000000);  // sign bit
   F64_MASK_EXP  = UInt64($7FF0000000000000);  // exponent
   F64_MASK_FRAC = UInt64($000FFFFFFFFFFFFF);  // fraction/mantissa
-  F64_MASK_NSGN = UInt64($7FFFFFFFFFFFFFFF);  // non-sign bits
   F64_MASK_FHB  = UInt64($0008000000000000);  // highest bit of the mantissa
+{$IFNDEF FPC} // to remove hints that cannot be suppressed :/
+  F64_MASK_NSGN = UInt64($7FFFFFFFFFFFFFFF);  // non-sign bits
   F64_MASK_INTB = UInt64($0010000000000000);  // otherwise implicit integer bit of the mantissa
+{$ENDIF}
 
-  F80_MASK16_SIGN = UInt16($8000);
   F80_MASK16_EXP  = UInt16($7FFF);
   F80_MASK64_FRAC = UInt64($7FFFFFFFFFFFFFFF);
-  F80_MASK16_NSGN = UInt16($7FFF);
   F80_MASK64_FHB  = UInt64($4000000000000000);
   F80_MASK64_INTB = UInt64($8000000000000000);
+{$IFNDEF FPC}
+  F80_MASK16_SIGN = UInt16($8000);
+  F80_MASK16_NSGN = UInt16($7FFF);
+{$ENDIF}
 
 {===============================================================================
     Library-specific exceptions - implementation
@@ -996,6 +1010,147 @@ end;
     Conversion routines - implementation
 ===============================================================================}
 {-------------------------------------------------------------------------------
+    Conversion routines - axiliary routines
+-------------------------------------------------------------------------------}
+{
+  There is a need for calculation with higher width than 64bits in conversion
+  from Float80 to Float64 (in mantissa denormalization).
+  Following routines and types implement bare minimum required for calculations
+  on 65bit wide integer.
+}
+type
+  UInt65 = record
+    Low64:  UInt64;
+    Bit65:  Byte;
+  end;
+
+const
+  UInt65_ZERO: UInt65 = (Low64: 0; Bit65: 0);
+
+  UI65_CMP_SMALLER = -1;
+  UI65_CMP_LARGER  = +1;
+
+//------------------------------------------------------------------------------
+
+Function UInt65Get(Low64: UInt64; Bit65: Byte): UInt65;
+begin
+Result.Low64 := Low64;
+Result.Bit65 := Bit65 and 1;
+end;
+
+//------------------------------------------------------------------------------
+
+Function UInt65Not(Value: UInt65): UInt65;
+begin
+Result.Low64 := not Value.Low64;
+Result.Bit65 := (not Value.Bit65) and 1;
+end;
+
+//------------------------------------------------------------------------------
+
+Function UInt65And(A,B: UInt65): UInt65;
+begin
+Result.Low64 := A.Low64 and B.Low64;
+Result.Bit65 := (A.Bit65 and B.Bit65) and 1;
+end;
+
+//------------------------------------------------------------------------------
+
+Function UInt65Add(Value: UInt65; Add: UInt65): UInt65;
+var
+  Temp:   Int64;
+  Carry:  Boolean;
+begin
+Temp := Int64(Int64Rec(Value.Low64).Lo) + Int64(Int64Rec(Add.Low64).Lo);
+Carry := Temp > $FFFFFFFF;
+Int64Rec(Result.Low64).Lo := Temp and $FFFFFFFF;  
+If Carry then
+  Temp := Int64(Int64Rec(Value.Low64).Hi) + Int64(Int64Rec(Add.Low64).Hi) + 1
+else
+  Temp := Int64(Int64Rec(Value.Low64).Hi) + Int64(Int64Rec(Add.Low64).Hi);
+Carry := Temp > $FFFFFFFF;
+Int64Rec(Result.Low64).Hi := Temp and $FFFFFFFF;
+If Carry then
+  Temp := Int64(Value.Bit65 and 1) + Int64(Add.Bit65 and 1) + 1
+else
+  Temp := Int64(Value.Bit65 and 1) + Int64(Add.Bit65 and 1);
+Result.Bit65 := Byte(Temp and 1);
+end;
+
+//------------------------------------------------------------------------------
+
+Function UInt65Subtract(Value: UInt65; Sub: UInt65): UInt65;
+var
+  Temp:   Int64;
+  Borrow: Boolean;
+begin
+Temp := Int64(Int64Rec(Value.Low64).Lo) - Int64(Int64Rec(Sub.Low64).Lo);
+Borrow := Temp < 0;
+Int64Rec(Result.Low64).Lo := Temp and $FFFFFFFF;  
+If Borrow then
+  Temp := Int64(Int64Rec(Value.Low64).Hi) - Int64(Int64Rec(Sub.Low64).Hi) - 1
+else
+  Temp := Int64(Int64Rec(Value.Low64).Hi) - Int64(Int64Rec(Sub.Low64).Hi);
+Borrow := Temp < 0;
+Int64Rec(Result.Low64).Hi := Temp and $FFFFFFFF;
+If Borrow then
+  Temp := Int64(Value.Bit65 and 1) - Int64(Sub.Bit65 and 1) - 1
+else
+  Temp := Int64(Value.Bit65 and 1) - Int64(Sub.Bit65 and 1);
+Result.Bit65 := Byte(Temp and 1);
+end;
+
+//------------------------------------------------------------------------------
+
+Function UInt65RShift(Value: UInt65; Shift: Byte): UInt65;
+begin
+If Shift <= 0 then
+  Result := Value
+else If (Shift > 0) and (Shift < 64) then
+  begin
+    Result.Low64 := Value.Low64 shr Shift or (UInt64(Value.Bit65 and 1) shl (64 - Shift));
+    Result.Bit65 := 0;
+  end
+else If Shift = 64 then
+  Result := UInt65Get(Value.Bit65 and 1,0)
+else
+  Result := UInt65_ZERO
+end;
+
+//------------------------------------------------------------------------------
+
+Function UInt65Compare(A,B: UInt65): Integer;
+begin
+If (A.Bit65 and 1) > (B.Bit65 and 1) then
+  Result := UI65_CMP_LARGER
+else If (A.Bit65 and 1) < (B.Bit65 and 1) then
+  Result := UI65_CMP_SMALLER
+else
+  begin
+    If Int64Rec(A.Low64).Hi > Int64Rec(B.Low64).Hi then
+      Result := UI65_CMP_LARGER
+    else If Int64Rec(A.Low64).Hi < Int64Rec(B.Low64).Hi then
+      Result := UI65_CMP_SMALLER
+    else
+      begin
+        If Int64Rec(A.Low64).Lo > Int64Rec(B.Low64).Lo then
+          Result := UI65_CMP_LARGER
+        else If Int64Rec(A.Low64).Lo < Int64Rec(B.Low64).Lo then
+          Result := UI65_CMP_SMALLER
+        else
+          Result := 0;
+      end;
+  end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function UInt65IsZero(Value: UInt65): Boolean;
+begin
+Result := (Value.Low64 = 0) and ((Value.Bit65 and 1) = 0);
+end;
+
+{-------------------------------------------------------------------------------
     Conversion routines - Float64 -> Float80 conversion
 -------------------------------------------------------------------------------}
 
@@ -1097,150 +1252,9 @@ end;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-Function Float64ToFloat80(Value: Float64): Auxtypes.Float80;
+Function Float64ToFloat80(Value: Float64): AuxTypes.Float80;
 begin
 Float64ToFloat80(@Value,@Result);
-end;
-
-{-------------------------------------------------------------------------------
-    Conversion routines - axiliary routines
--------------------------------------------------------------------------------}
-{
-  There is a need for calculation with higher width than 64bits in conversion
-  from Float80 to Float64 (in mantissa denormalization).
-  Following routines and types implement bare minimum required for calculations
-  on 65bit wide integer.
-}
-type
-  UInt65 = record
-    Low64:  UInt64;
-    Bit65:  Byte;
-  end;
-
-const
-  UInt65_ZERO: UInt65 = (Low64: 0; Bit65: 0);
-
-  UI65_CMP_SMALLER = -1;
-  UI65_CMP_LARGER  = +1;
-
-//------------------------------------------------------------------------------
-
-Function UInt65Get(Low64: UInt64; Bit65: Byte): UInt65;
-begin
-Result.Low64 := Low64;
-Result.Bit65 := Bit65 and 1;
-end;
-
-//------------------------------------------------------------------------------
-
-Function UInt65Not(Value: UInt65): UInt65;
-begin
-Result.Low64 := not Value.Low64;
-Result.Bit65 := (not Value.Bit65) and 1;
-end;
-
-//------------------------------------------------------------------------------
-
-Function UInt65And(A,B: UInt65): UInt65;
-begin
-Result.Low64 := A.Low64 and B.Low64;
-Result.Bit65 := (A.Bit65 and B.Bit65) and 1;
-end;
-
-//------------------------------------------------------------------------------
-
-Function UInt65Add(Value: UInt65; Add: UInt65): UInt65;
-var
-  Temp:   Int64;
-  Carry:  Boolean;
-begin
-Temp := Int64(Int64Rec(Value.Low64).Lo) + Int64(Int64Rec(Add.Low64).Lo);
-Carry := Temp > $FFFFFFFF;
-Int64Rec(Result.Low64).Lo := Temp and $FFFFFFFF;  
-If Carry then
-  Temp := Int64(Int64Rec(Value.Low64).Hi) + Int64(Int64Rec(Add.Low64).Hi) + 1
-else
-  Temp := Int64(Int64Rec(Value.Low64).Hi) + Int64(Int64Rec(Add.Low64).Hi);
-Carry := Temp > $FFFFFFFF;
-Int64Rec(Result.Low64).Hi := Temp and $FFFFFFFF;
-If Carry then
-  Temp := (Value.Bit65 and 1) + (Add.Bit65 and 1) + 1
-else
-  Temp := (Value.Bit65 and 1) + (Add.Bit65 and 1);
-Result.Bit65 := Byte(Temp and 1);
-end;
-
-//------------------------------------------------------------------------------
-
-Function UInt65Subtract(Value: UInt65; Sub: UInt65): UInt65;
-var
-  Temp:   Int64;
-  Borrow: Boolean;
-begin
-Temp := Int64(Int64Rec(Value.Low64).Lo) - Int64(Int64Rec(Sub.Low64).Lo);
-Borrow := Temp < 0;
-Int64Rec(Result.Low64).Lo := Temp and $FFFFFFFF;  
-If Borrow then
-  Temp := Int64(Int64Rec(Value.Low64).Hi) - Int64(Int64Rec(Sub.Low64).Hi) - 1
-else
-  Temp := Int64(Int64Rec(Value.Low64).Hi) - Int64(Int64Rec(Sub.Low64).Hi);
-Borrow := Temp < 0;
-Int64Rec(Result.Low64).Hi := Temp and $FFFFFFFF;
-If Borrow then
-  Temp := (Value.Bit65 and 1) - (Sub.Bit65 and 1) - 1
-else
-  Temp := (Value.Bit65 and 1) - (Sub.Bit65 and 1);
-Result.Bit65 := Byte(Temp and 1);
-end;
-
-//------------------------------------------------------------------------------
-
-Function UInt65RShift(Value: UInt65; Shift: Byte): UInt65;
-begin
-If Shift <= 0 then
-  Result := Value
-else If (Shift > 0) and (Shift < 64) then
-  begin
-    Result.Low64 := Value.Low64 shr Shift or (UInt64(Value.Bit65 and 1) shl (64 - Shift));
-    Result.Bit65 := 0;
-  end
-else If Shift = 64 then
-  Result := UInt65Get(Value.Bit65 and 1,0)
-else
-  Result := UInt65_ZERO
-end;
-
-//------------------------------------------------------------------------------
-
-Function UInt65Compare(A,B: UInt65): Integer;
-begin
-If (A.Bit65 and 1) > (B.Bit65 and 1) then
-  Result := UI65_CMP_LARGER
-else If (A.Bit65 and 1) < (B.Bit65 and 1) then
-  Result := UI65_CMP_SMALLER
-else
-  begin
-    If Int64Rec(A.Low64).Hi > Int64Rec(B.Low64).Hi then
-      Result := UI65_CMP_LARGER
-    else If Int64Rec(A.Low64).Hi < Int64Rec(B.Low64).Hi then
-      Result := UI65_CMP_SMALLER
-    else
-      begin
-        If Int64Rec(A.Low64).Lo > Int64Rec(B.Low64).Lo then
-          Result := UI65_CMP_LARGER
-        else If Int64Rec(A.Low64).Lo < Int64Rec(B.Low64).Lo then
-          Result := UI65_CMP_SMALLER
-        else
-          Result := 0;
-      end;
-  end;
-end;
-
-//------------------------------------------------------------------------------
-
-Function UInt65IsZero(Value: UInt65): Boolean;
-begin
-Result := (Value.Low64 = 0) and ((Value.Bit65 and 1) = 0);
 end;
 
 {-------------------------------------------------------------------------------
@@ -1277,7 +1291,7 @@ var
     If (Shift > 0) and (Shift <= 64) then
       begin
         Value65 := UInt65Get(Value,0);
-        Mask := UInt65RShift(UInt65Get($FFFFFFFFFFFFFFFF,0),64 - Shift);
+        Mask := UInt65RShift(UInt65Get(UInt64($FFFFFFFFFFFFFFFF),0),64 - Shift);
         If not UInt65IsZero(UInt65And(UInt65Get(Value,0),Mask)) then
           begin
             DataLoss := not UInt65IsZero(UInt65And(Value65,Mask));          
@@ -1368,8 +1382,10 @@ var
 
 begin
 RoundMode := GetX87RoundingMode;
+{$IFDEF FPCDWM}{$PUSH}W4055{$ENDIF}
 Sign := UInt64(PUInt8(PtrUInt(Float80Ptr) + 9)^ and $80) shl 56;
 Exponent := Int32(PUInt16(PtrUInt(Float80Ptr) + 8)^) and F80_MASK16_EXP;
+{$IFDEF FPCDWM}{$POP}{$ENDIF}
 Mantissa := UInt64(Float80Ptr^);
 // check unsupported encodings...
 If ((Exponent > 0) and (Exponent <= F80_MASK16_EXP)) and ((Mantissa and F80_MASK64_INTB) = 0) then
@@ -1564,7 +1580,7 @@ end;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-Function Float80ToFloat64(Value: Auxtypes.Float80): Float64;
+Function Float80ToFloat64(Value: AuxTypes.Float80): Float64;
 begin
 Float80ToFloat64(@Value,@Result);
 end;
