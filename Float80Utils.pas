@@ -1,16 +1,73 @@
-{$message 'write some sensible explanations here'}
-{
-  Functions and constants provided in this sections are meant for explicit
-  conversion between double precission (8-byte/64bit) floating point numbers
-  and double-extended precission (10-byte/80bit) floating point numbers.
+{-------------------------------------------------------------------------------
 
-  It is here because in some situations (eg. compilation for x86-64 CPU), there
-  is no 80bit float supported by the compiler, and therefore no way of easy
-  conversion. Yet, there may be a need for it.
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-  Main routines are ConvertFloat64ToFloat80 and ConvertFloat80ToFloat64, others
-  are here only as an infrastructure for them.
-}
+-------------------------------------------------------------------------------}
+{===============================================================================
+
+  Float80Utils
+
+    Main aim of this library is to provide a mean of converting to and from
+    double-extended-precision (80bit) floating point numbers.
+    It is meant for environments where type Extended is declared only as an
+    alias for type Double (64bit float) - typically 64bit applications where
+    SSE, which does not support 80bit floats, is used as a primary FPU.
+
+    Beyond the conversion routines, there are also some utilities - namely
+    functions for number information or encoding/decoding the float80 type
+    from/to its substituent parts (mantissa, exponent, sign).    
+
+    From user perspective, there is not much difference, but it must be noted
+    that the unit can be compiled in two modes, each totally different.
+
+    First, default mode, is using assembly to directly access x87 FPU and does
+    the conversion there.
+    In this mode, auxiliry functions provided here (access to status and control
+    word, exceptions masking and so on) operates directly on real x87 registers
+    and exceptions raising is also managed by the x87 FPU.
+
+    Second is PurePascal mode. In it, a complete pascal implementation of
+    conversion is used instead, so it can be called even on systems with no
+    suitable FPU.
+    Auxiliray functions are operating on local software implementation of
+    status and control word and do not access the hardware.
+    This implementation partially emulates the conversion how its done on x87,
+    including exception raising (exception masking and pre- and post-calculation
+    nature of exceptions are honored) and changes given by selected rounding
+    mode (note that precision mode does not affect conversions even on real x87
+    FPU).
+    But remember it is only an emulation, not simulation - there are diferences,
+    notably condition codes are not affected by exceptions, and when raising
+    unmasked exception, the exception status bits are not set, nor are busy and
+    summary flag bits. Top of the stack and stack fault flag are outright
+    ignored.
+
+  Version 1.0 (2020-11-20)
+
+  Last change 2020-11-20
+
+  ©2020 František Milt
+
+  Contacts:
+    František Milt: frantisek.milt@gmail.com
+
+  Support:
+    If you find this code useful, please consider supporting its author(s) by
+    making a small donation using the following link(s):
+
+      https://www.paypal.me/FMilt
+
+  Changelog:
+    For detailed changelog and history please refer to this git repository:
+
+      github.com/TheLazyTomcat/Lib.Float80Utils
+
+  Dependencies:
+    AuxTypes - github.com/TheLazyTomcat/Lib.AuxTypes
+
+===============================================================================}
 unit Float80Utils; 
 {
   Float80_PurePascal
@@ -20,10 +77,10 @@ unit Float80Utils;
   cannot make changes to this unit, define this symbol for the entire project
   and this unit will be compiled in PurePascal mode.
 }
-{$DEFINE Float80_PurePascal}
 {$IFDEF Float80_PurePascal}
   {$DEFINE PurePascal}
 {$ENDIF}
+{$DEFINE PurePascal}{$message warn 'threading!!!'}
 
 {$IF not(defined(CPU386) or defined(CPUX86_64) or defined(CPUX64))}
   {$DEFINE PurePascal}
@@ -51,6 +108,15 @@ unit Float80Utils;
   {$IFEND}
 {$ENDIF}
 {$H+}
+
+{
+  InitializeX87CW
+
+  When defined and when PurePascal symbol is not defined
+
+  Defined by default.
+}
+{$DEFINE InitializeX87CW}
 
 interface
 
@@ -195,7 +261,6 @@ const
   X87CW_SHIFT_Precision = 8;
   X87CW_SHIFT_Rounding  = 10;
 
-
 //------------------------------------------------------------------------------
 {
   EmulatedX87ControlWord
@@ -223,11 +288,6 @@ procedure SetX87ControlWord(NewValue: UInt16);{$IFNDEF PurePascal} register; ass
   Sets x87 control word to $1372 - denormal, underflow and precision exceptions
   are masked (others are unmasked), precision is set to extended, rounding is
   set to nearest and infinity control bit is 1.
-
-  Call this routine only when the control word is NOT emulated (ie. a real CPU
-  register is used) and the program is compiled so that x87 FPU is not used as
-  primary mean of floating point arithmetics and/or is not automatically
-  initialized (typically when compiled for Windows 64bit).
 }
 procedure InitX87ControlWord;{$IFDEF CanInline} inline;{$ENDIF}
 
@@ -614,14 +674,21 @@ Function EncodeFloat80(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedE
 
 implementation
 
+{$IFDEF FPC_DisableWarns}
+  {$DEFINE FPCDWM}
+  {$DEFINE W5024:={$WARN 5024 OFF}}   // Parameter "$1" not used
+{$ENDIF}
+
 {===============================================================================
     Internal constants and types
 ===============================================================================}
 const
+{$IFDEF PurePascal}
   F64_MASK_SIGN = UInt64($8000000000000000);  // sign bit
   F64_MASK_EXP  = UInt64($7FF0000000000000);  // exponent
   F64_MASK_FRAC = UInt64($000FFFFFFFFFFFFF);  // fraction/mantissa
   F64_MASK_FHB  = UInt64($0008000000000000);  // highest bit of the mantissa
+{$ENDIF}
 {$IFNDEF FPC} // to remove hints that cannot be suppressed... :/
   F64_MASK_NSGN = UInt64($7FFFFFFFFFFFFFFF);  // non-sign bits
   F64_MASK_INTB = UInt64($0010000000000000);  // integer bit of the mantissa
@@ -631,7 +698,9 @@ const
   F80_MASK16_NSGN = UInt16($7FFF);
   F80_MASK16_EXP  = UInt16($7FFF);
   F80_MASK64_FRAC = UInt64($7FFFFFFFFFFFFFFF);
+{$IFDEF PurePascal}
   F80_MASK64_FHB  = UInt64($4000000000000000);
+{$ENDIF}
   F80_MASK64_INTB = UInt64($8000000000000000);
 
 {===============================================================================
@@ -713,8 +782,8 @@ end;
 -------------------------------------------------------------------------------}
 
 {$IFDEF PurePascal}
-var
-  Pas_X87SW: UInt16 = 0;
+threadvar
+  Pas_X87SW: UInt16;
 {$ENDIF}
 
 //------------------------------------------------------------------------------
@@ -746,12 +815,12 @@ end;
 -------------------------------------------------------------------------------}
 
 {$IFDEF PurePascal}
-var
+threadvar
 {
   denormal, underflow and precision exceptions are masked, precision set to
   extended, rounding set to nearest and infinity control bit set
 }
-  Pas_X87CW: UInt16 = $1372;
+  Pas_X87CW: UInt16;
 {$ENDIF}
 
 //------------------------------------------------------------------------------
@@ -875,6 +944,7 @@ end;
 
 //------------------------------------------------------------------------------
 
+{$IFNDEF PurePascal}{$IFDEF FPCDWM}{$PUSH}W5024{$ENDIF}{$ENDIF}
 Function SetX87TopOfStack(NewValue: Integer): Integer;
 begin
 Result := GetX87TopOfStack;
@@ -882,6 +952,7 @@ Result := GetX87TopOfStack;
 Pas_X87SW := (Pas_X87SW and not X87SW_TopOfStack) or ((NewValue shl X87SW_SHIFT_TopOfStack) and X87SW_TopOfStack);
 {$ENDIF}
 end;
+{$IFNDEF PurePascal}{$IFDEF FPCDWM}{$POP}{$ENDIF}{$ENDIF}
 
 //------------------------------------------------------------------------------
 
@@ -902,6 +973,7 @@ end;
 
 //------------------------------------------------------------------------------
 
+{$IFNDEF PurePascal}{$IFDEF FPCDWM}{$PUSH}W5024{$ENDIF}{$ENDIF}
 Function SetX87StatusFlag(Flag: TX87StatusFlag; NewValue: Boolean): Boolean;
 {$IFDEF PurePascal}
 
@@ -932,6 +1004,7 @@ begin
 Result := GetX87StatusFlag(Flag);
 end;
 {$ENDIF}
+{$IFNDEF PurePascal}{$IFDEF FPCDWM}{$POP}{$ENDIF}{$ENDIF}
 
 //------------------------------------------------------------------------------
 
@@ -958,6 +1031,7 @@ end;
 
 //------------------------------------------------------------------------------
 
+{$IFNDEF PurePascal}{$IFDEF FPCDWM}{$PUSH}W5024{$ENDIF}{$ENDIF}
 Function SetX87StatusFlags(NewValue: TX87StatusFlags): TX87StatusFlags;
 {$IFDEF PurePascal}
 
@@ -984,6 +1058,7 @@ begin
 Result := GetX87StatusFlags;
 end;
 {$ENDIF}
+{$IFNDEF PurePascal}{$IFDEF FPCDWM}{$POP}{$ENDIF}{$ENDIF}
 
 //------------------------------------------------------------------------------
 
@@ -1165,6 +1240,7 @@ end;
 
 //------------------------------------------------------------------------------
 
+{$IFNDEF PurePascal}{$IFDEF FPCDWM}{$PUSH}W5024{$ENDIF}{$ENDIF}
 Function SetX87ExceptionState(Exception: TX87Exception; NewValue: Boolean): Boolean;
 {$IFDEF PurePascal}
 
@@ -1194,6 +1270,7 @@ begin
 Result := GetX87ExceptionState(Exception);
 end;
 {$ENDIF}
+{$IFNDEF PurePascal}{$IFDEF FPCDWM}{$POP}{$ENDIF}{$ENDIF}
 
 //------------------------------------------------------------------------------
 
@@ -1219,6 +1296,7 @@ end;
 
 //------------------------------------------------------------------------------
 
+{$IFNDEF PurePascal}{$IFDEF FPCDWM}{$PUSH}W5024{$ENDIF}{$ENDIF}
 Function SetX87ExceptionStates(NewValue: TX87Exceptions): TX87Exceptions;
 {$IFDEF PurePascal}
 
@@ -1244,6 +1322,7 @@ begin
 Result := GetX87ExceptionStates;
 end;
 {$ENDIF}
+{$IFNDEF PurePascal}{$IFDEF FPCDWM}{$POP}{$ENDIF}{$ENDIF}
 
 //------------------------------------------------------------------------------
 
@@ -2127,5 +2206,16 @@ else
       _Result.Mantissa := Mantissa or F80_MASK64_INTB;
   end;
 end;
+
+initialization
+{$IFDEF PurePascal}
+  Pas_X87SW := 0;
+  Pas_X87CW := $1372;
+{$ELSE}
+{$IFDEF InitializeX87CW}
+  If GetX87ControlWord = $037F then
+    InitX87ControlWord;
+{$ENDIF}
+{$ENDIF}
 
 end.
