@@ -297,25 +297,106 @@ procedure RaiseX87Exceptions;
                          Float80 <-> Float64 conversions
 --------------------------------------------------------------------------------
 ===============================================================================}
+type
+  // overlay for easier work with 10-byte extended precision float
+  TFloat80Overlay = packed record
+    case Integer of
+      0:  (Part_64:       UInt64;
+           Part_16:       UInt16);
+      1:  (Mantissa:      UInt64;
+           SignExponent:  UInt16);
+      2:  (Words:         array[0..4] of UInt16);
+      3:  (Bytes:         array[0..9] of UInt8);
+  end;
+
+const
+  FLOAT64_EXPONENTBIAS = 1023;
+  FLOAT80_EXPONENTBIAS = 16383;
+  
 {===============================================================================
     Conversion routines - declaration
 ===============================================================================}
 
 procedure Float64ToFloat80(Float64Ptr,Float80Ptr: Pointer); overload;{$IFNDEF PurePascal} register; assembler;{$ENDIF}
 
-Function Float64ToFloat80(Value: Float64): AuxTypes.Float80; overload;
+Function Float64ToFloat80(Value: Float64): Float80; overload;
 
 //------------------------------------------------------------------------------
 
 procedure Float80ToFloat64(Float80Ptr,Float64Ptr: Pointer); overload;{$IFNDEF PurePascal} register; assembler;{$ENDIF}
 
-Function Float80ToFloat64(Value: AuxTypes.Float80): Float64; overload;
+Function Float80ToFloat64(Value: Float80): Float64; overload;
 
 {===============================================================================
 --------------------------------------------------------------------------------
-                         Float80 utilities
+                               Float80 utilities                                                                                           
 --------------------------------------------------------------------------------
 ===============================================================================}
+{===============================================================================
+    Utility routines - declaration
+===============================================================================}
+{-------------------------------------------------------------------------------
+    Utility routines - number information functions
+-------------------------------------------------------------------------------}
+
+Function IsValid(const Value: Float80): Boolean;
+
+Function IsZero(const Value: Float80): Boolean;
+Function IsDenormal(const Value: Float80): Boolean;
+Function IsNaN(const Value: Float80): Boolean;
+Function IsInfinite(const Value: Float80): Boolean;
+Function IsNormal(const Value: Float80): Boolean; // returns false on zero 
+
+Function IsPseudoValue(const Value: Float80): Boolean;{$IFDEF CanInline} inline;{$ENDIF}
+
+Function IsPseudoDenormal(const Value: Float80): Boolean;
+Function IsPseudoNaN(const Value: Float80): Boolean;
+Function IsPseudoInfinity(const Value: Float80): Boolean;
+Function IsUnnormal(const Value: Float80): Boolean;
+
+{-------------------------------------------------------------------------------
+    Utility routines - sign-related functions
+-------------------------------------------------------------------------------}
+type
+  TFLoat80ValueSign = -1..1;
+
+{
+  Following three routines will raise and EF80InvalidOp exception when an
+  invalidly encoded number is passed.
+}
+Function Sign(const Value: Float80): TFLoat80ValueSign;
+Function Abs(const Value: Float80): Float80;
+Function Neg(const Value: Float80): Float80;
+
+{-------------------------------------------------------------------------------
+    Utility routines - float parts
+-------------------------------------------------------------------------------}
+{
+  DecodeFloat80
+
+  When BiasedExp is set to true, the returned exponent is exponent as is
+  stored in the value, that is, biased. When false, the returned exponent is
+  unbiased (its true value).
+
+  When IntBit is set to true, the returned mantissa contains the integer bit
+  (bit 63) as it is stored in the number. When false, the integer bit is
+  masked-out and is zero, irrespective of its actual value.
+}
+procedure DecodeFloat80(const Value: Float80; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+
+{
+  EncodeFloat80
+
+  When BiasedExp is true, it indicates that the passed exponent is already
+  biased and will be stored as is. When false, the passed exponent will be
+  biased before storing.
+
+  When IntBit is true, it indicates that the passed mantissa contains the
+  integer bit (bit 63) and will be stored as is. When false, the integer bit
+  in passed mantissa is ignored and its value for storage is implied from the
+  exponent.
+}
+Function EncodeFloat80(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80;
 
 implementation
 
@@ -337,14 +418,12 @@ const
   F64_MASK_INTB = UInt64($0010000000000000);  // otherwise implicit integer bit of the mantissa
 {$ENDIF}
 
+  F80_MASK16_SIGN = UInt16($8000);
+  F80_MASK16_NSGN = UInt16($7FFF);
   F80_MASK16_EXP  = UInt16($7FFF);
   F80_MASK64_FRAC = UInt64($7FFFFFFFFFFFFFFF);
   F80_MASK64_FHB  = UInt64($4000000000000000);
   F80_MASK64_INTB = UInt64($8000000000000000);
-{$IFNDEF FPC}
-  F80_MASK16_SIGN = UInt16($8000);
-  F80_MASK16_NSGN = UInt16($7FFF);
-{$ENDIF}
 
 {===============================================================================
     Library-specific exceptions - implementation
@@ -1252,7 +1331,7 @@ end;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-Function Float64ToFloat80(Value: Float64): AuxTypes.Float80;
+Function Float64ToFloat80(Value: Float64): Float80;
 begin
 Float64ToFloat80(@Value,@Result);
 end;
@@ -1580,9 +1659,250 @@ end;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-Function Float80ToFloat64(Value: AuxTypes.Float80): Float64;
+Function Float80ToFloat64(Value: Float80): Float64;
 begin
 Float80ToFloat64(@Value,@Result);
+end;
+
+
+{===============================================================================
+--------------------------------------------------------------------------------
+                               Float80 utilities                                                                                           
+--------------------------------------------------------------------------------
+===============================================================================}
+{===============================================================================
+    Utility routines - implementation
+===============================================================================}
+{-------------------------------------------------------------------------------
+    Utility routines - number information functions
+-------------------------------------------------------------------------------}
+
+Function IsValid(const Value: Float80): Boolean;
+var
+  _Value: TFloat80Overlay absolute Value;
+begin
+{
+  Non-zero exponent with zero integer bit, or zero exponent with non-zero
+  integer bit are both unsuported encodings.
+
+  Note that pseudo-denormals (zero exponent, non-zero integer bit) are also not
+  valid, but can be processed by x87 without raising an InvalidOP exception
+  (they are silently converted to usual denormals or zero).
+}
+Result := not((((_Value.SignExponent and F80_MASK16_EXP) <> 0) and ((_Value.Mantissa and F80_MASK64_INTB) = 0)) or
+              (((_Value.SignExponent and F80_MASK16_EXP) = 0) and ((_Value.Mantissa and F80_MASK64_INTB) <> 0)));
+end;
+
+//------------------------------------------------------------------------------
+
+Function IsZero(const Value: Float80): Boolean;
+var
+  _Value: TFloat80Overlay absolute Value;
+begin
+// zero exponent and mantissa
+Result := ((_Value.SignExponent and F80_MASK16_EXP) = 0) and (_Value.Mantissa = 0);
+end;
+
+//------------------------------------------------------------------------------
+
+Function IsDenormal(const Value: Float80): Boolean;
+var
+  _Value: TFloat80Overlay absolute Value;
+begin
+// zero exponent, integer bit 0, non-zero fraction
+Result := ((_Value.SignExponent and F80_MASK16_EXP) = 0) and
+          ((_Value.Mantissa and F80_MASK64_INTB) = 0) and
+          ((_Value.Mantissa and F80_MASK64_FRAC) <> 0);
+end;
+
+//------------------------------------------------------------------------------
+
+Function IsNaN(const Value: Float80): Boolean;
+var
+  _Value: TFloat80Overlay absolute Value;
+begin
+// max exponent, integer bit 1, non-zero fraction
+Result := ((_Value.SignExponent and F80_MASK16_EXP) = F80_MASK16_EXP) and
+          ((_Value.Mantissa and F80_MASK64_INTB) <> 0) and
+          ((_Value.Mantissa and F80_MASK64_FRAC) <> 0);
+end;
+
+//------------------------------------------------------------------------------
+
+Function IsInfinite(const Value: Float80): Boolean;
+var
+  _Value: TFloat80Overlay absolute Value;
+begin
+// max exponent, integer bit 1, zero fraction
+Result := ((_Value.SignExponent and F80_MASK16_EXP) = F80_MASK16_EXP) and
+          ((_Value.Mantissa and F80_MASK64_INTB) <> 0) and
+          ((_Value.Mantissa and F80_MASK64_FRAC) = 0);
+end;
+
+//------------------------------------------------------------------------------
+
+Function IsNormal(const Value: Float80): Boolean;
+var
+  _Value: TFloat80Overlay absolute Value;
+begin
+// exponent >0 and <max, integer bit 1, any fraction
+Result := (((_Value.SignExponent and F80_MASK16_EXP) > 0) and
+           ((_Value.SignExponent and F80_MASK16_EXP) <= F80_MASK16_EXP)) and
+          ((_Value.Mantissa and F80_MASK64_INTB) <> 0);
+end;
+
+//------------------------------------------------------------------------------
+
+Function IsPseudoValue(const Value: Float80): Boolean;
+begin
+Result := not IsValid(Value);
+end;
+
+//------------------------------------------------------------------------------
+
+Function IsPseudoDenormal(const Value: Float80): Boolean;
+var
+  _Value: TFloat80Overlay absolute Value;
+begin
+// zero exponent, non-zero mantissa with integer bit 1
+Result := ((_Value.SignExponent and F80_MASK16_EXP) = 0) and
+          ((_Value.Mantissa <> 0) and ((_Value.Mantissa and F80_MASK64_INTB) <> 0));
+end;
+
+//------------------------------------------------------------------------------
+
+Function IsPseudoNaN(const Value: Float80): Boolean;
+var
+  _Value: TFloat80Overlay absolute Value;
+begin
+// max exponent, integer bit 0, non-zero fraction
+Result := ((_Value.SignExponent and F80_MASK16_EXP) = F80_MASK16_EXP) and
+          ((_Value.Mantissa and F80_MASK64_INTB) = 0) and
+          ((_Value.Mantissa and F80_MASK64_FRAC) <> 0);
+end;
+
+//------------------------------------------------------------------------------
+
+Function IsPseudoInfinity(const Value: Float80): Boolean;
+var
+  _Value: TFloat80Overlay absolute Value;
+begin
+// max exponent, integer bit 0, zero fraction
+Result := ((_Value.SignExponent and F80_MASK16_EXP) = F80_MASK16_EXP) and
+          ((_Value.Mantissa and F80_MASK64_INTB) = 0) and
+          ((_Value.Mantissa and F80_MASK64_FRAC) = 0);
+end;
+
+//------------------------------------------------------------------------------
+
+Function IsUnnormal(const Value: Float80): Boolean;
+var
+  _Value: TFloat80Overlay absolute Value;
+begin
+// exponent >0 and <max, integer bit 0, any fraction
+Result := (((_Value.SignExponent and F80_MASK16_EXP) > 0) and
+           ((_Value.SignExponent and F80_MASK16_EXP) <= F80_MASK16_EXP)) and
+          ((_Value.Mantissa and F80_MASK64_INTB) = 0);
+end;
+
+{-------------------------------------------------------------------------------
+    Utility routines - sign-related functions
+-------------------------------------------------------------------------------}
+
+Function Sign(const Value: Float80): TFLoat80ValueSign;
+var
+  _Value: TFloat80Overlay absolute Value;
+begin
+If IsValid(Value) then
+  begin
+    If ((_Value.SignExponent and F80_MASK16_NSGN) <> 0) or (_Value.Mantissa <> 0) then
+      begin
+        If (_Value.SignExponent and F80_MASK16_SIGN) <> 0 then
+          Result := -1
+        else
+          Result := 1;
+      end
+    else Result := 0;
+  end
+else raise EF80InvalidOp.CreateDefMsg;
+end;
+
+//------------------------------------------------------------------------------
+
+Function Abs(const Value: Float80): Float80;
+var
+  _Value:   TFloat80Overlay absolute Value;
+  _Result:  TFloat80Overlay absolute Result;
+begin
+If IsValid(Value) then
+  begin
+    _Result.Mantissa := _Value.Mantissa;
+    _Result.SignExponent := _Value.SignExponent and not F80_MASK16_SIGN;
+  end
+else raise EF80InvalidOp.CreateDefMsg;
+end;
+
+//------------------------------------------------------------------------------
+
+Function Neg(const Value: Float80): Float80;
+var
+  _Value:   TFloat80Overlay absolute Value;
+  _Result:  TFloat80Overlay absolute Result;
+begin
+If IsValid(Value) then
+  begin
+    _Result.Mantissa := _Value.Mantissa;
+    _Result.SignExponent := _Value.SignExponent xor F80_MASK16_SIGN;
+  end
+else raise EF80InvalidOp.CreateDefMsg;
+end;
+
+{-------------------------------------------------------------------------------
+    Utility routines - value encoding and decoding
+-------------------------------------------------------------------------------}
+
+procedure DecodeFloat80(const Value: Float80; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+var
+  _Value: TFloat80Overlay absolute Value;
+begin
+If IntBit then
+  Mantissa := _Value.Mantissa
+else
+  Mantissa := _Value.Mantissa and not F80_MASK64_INTB;
+If BiasedExp then
+  Exponent := Int16(_Value.SignExponent and F80_MASK16_EXP)
+else
+  Exponent := Int16(_Value.SignExponent and F80_MASK16_EXP) - FLOAT80_EXPONENTBIAS;
+Sign := (_Value.SignExponent and F80_MASK16_SIGN) <> 0;
+end;
+
+//------------------------------------------------------------------------------
+
+Function EncodeFloat80(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80;
+var
+  SignExponent: UInt16;
+  _Result:      TFloat80Overlay absolute Result;
+begin
+If Sign then
+  SignExponent := $8000
+else
+  SignExponent := $0000;
+If BiasedExp then
+  _Result.SignExponent := SignExponent or (UInt16(Exponent) and F80_MASK16_EXP)
+else
+  _Result.SignExponent := SignExponent or (UInt16(Exponent + FLOAT80_EXPONENTBIAS) and F80_MASK16_EXP);
+If IntBit then
+  _Result.Mantissa := Mantissa
+else
+  begin
+    // imply integer bit from exponent...
+    If (_Result.SignExponent and F80_MASK16_EXP) = 0 then
+      // zero exponent (zero or denormal) - integer bit 0
+      _Result.Mantissa := Mantissa and not F80_MASK64_INTB
+    else
+      // non-zero exponent - integer bit 1
+      _Result.Mantissa := Mantissa or F80_MASK64_INTB;
+  end;
 end;
 
 end.
