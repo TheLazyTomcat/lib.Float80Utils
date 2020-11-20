@@ -25,17 +25,13 @@ unit Float80Utils;
   {$DEFINE PurePascal}
 {$ENDIF}
 
-{$IF defined(CPUX86_64) or defined(CPUX64)}
-  {$DEFINE x64}
-{$ELSEIF defined(CPU386)}
-  {$DEFINE x86}
-{$ELSE}
+{$IF not(defined(CPU386) or defined(CPUX86_64) or defined(CPUX64))}
   {$DEFINE PurePascal}
 {$IFEND}
 
 {$IFDEF ENDIAN_BIG}
-  // it might work in BE systems, but I cannot test it
-  {$MESSAGE FATAL 'Big-endian system not supported'}
+  // sadly, I have no way of developing for BE systems :(
+  {$MESSAGE FATAL 'Big-endian architecture not supported'}
 {$ENDIF}
 
 {$IFDEF FPC}
@@ -308,6 +304,7 @@ type
       2:  (Words:         array[0..4] of UInt16);
       3:  (Bytes:         array[0..9] of UInt8);
   end;
+  PFloat80Overlay = ^TFloat80Overlay;
 
 const
   FLOAT64_EXPONENTBIAS = 1023;
@@ -347,7 +344,7 @@ Function IsNaN(const Value: Float80): Boolean;
 Function IsInfinite(const Value: Float80): Boolean;
 Function IsNormal(const Value: Float80): Boolean; // returns false on zero 
 
-Function IsPseudoValue(const Value: Float80): Boolean;{$IFDEF CanInline} inline;{$ENDIF}
+Function IsPseudoValue(const Value: Float80): Boolean;{$IFDEF CanInline} inline;{$ENDIF}  // not IsValid
 
 Function IsPseudoDenormal(const Value: Float80): Boolean;
 Function IsPseudoNaN(const Value: Float80): Boolean;
@@ -358,13 +355,13 @@ Function IsUnnormal(const Value: Float80): Boolean;
     Utility routines - sign-related functions
 -------------------------------------------------------------------------------}
 type
-  TFLoat80ValueSign = -1..1;
+  TFloat80ValueSign = -1..1;
 
 {
   Following three routines will raise and EF80InvalidOp exception when an
   invalidly encoded number is passed.
 }
-Function Sign(const Value: Float80): TFLoat80ValueSign;
+Function Sign(const Value: Float80): TFloat80ValueSign;
 Function Abs(const Value: Float80): Float80;
 Function Neg(const Value: Float80): Float80;
 
@@ -400,11 +397,6 @@ Function EncodeFloat80(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedE
 
 implementation
 
-{$IFDEF FPC_DisableWarns}
-  {$DEFINE FPCDWM}
-  {$DEFINE W4055:={$WARN 4055 OFF}}   // Conversion between ordinals and pointers is not portable
-{$ENDIF}
-
 {===============================================================================
     Internal constants and types
 ===============================================================================}
@@ -413,9 +405,9 @@ const
   F64_MASK_EXP  = UInt64($7FF0000000000000);  // exponent
   F64_MASK_FRAC = UInt64($000FFFFFFFFFFFFF);  // fraction/mantissa
   F64_MASK_FHB  = UInt64($0008000000000000);  // highest bit of the mantissa
-{$IFNDEF FPC} // to remove hints that cannot be suppressed :/
+{$IFNDEF FPC} // to remove hints that cannot be suppressed... :/
   F64_MASK_NSGN = UInt64($7FFFFFFFFFFFFFFF);  // non-sign bits
-  F64_MASK_INTB = UInt64($0010000000000000);  // otherwise implicit integer bit of the mantissa
+  F64_MASK_INTB = UInt64($0010000000000000);  // integer bit of the mantissa
 {$ENDIF}
 
   F80_MASK16_SIGN = UInt16($8000);
@@ -1246,12 +1238,10 @@ var
   Mantissa:       UInt64;
   MantissaShift:  Integer;
 
-  procedure BuildExtendedResult(Upper: UInt16; Lower: UInt64);
+  procedure BuildExtendedResult(SigExp: UInt16; Man: UInt64);
   begin
-  {$IFDEF FPCDWM}{$PUSH}W4055{$ENDIF}
-    PUInt16(PtrUInt(Float80Ptr) + 8)^ := Upper;
-  {$IFDEF FPCDWM}{$POP}{$ENDIF}
-    UInt64(Float80Ptr^) := Lower;
+    PFloat80Overlay(Float80Ptr)^.Mantissa := Man;
+    PFloat80Overlay(Float80Ptr)^.SignExponent := SigExp;
   end;
 
   Function HighZeroCount(Value: UInt64): Integer;
@@ -1461,11 +1451,9 @@ var
 
 begin
 RoundMode := GetX87RoundingMode;
-{$IFDEF FPCDWM}{$PUSH}W4055{$ENDIF}
-Sign := UInt64(PUInt8(PtrUInt(Float80Ptr) + 9)^ and $80) shl 56;
-Exponent := Int32(PUInt16(PtrUInt(Float80Ptr) + 8)^) and F80_MASK16_EXP;
-{$IFDEF FPCDWM}{$POP}{$ENDIF}
-Mantissa := UInt64(Float80Ptr^);
+Sign := UInt64(PFloat80Overlay(Float80Ptr)^.SignExponent and F80_MASK16_SIGN) shl 48;
+Exponent := Int32(PFloat80Overlay(Float80Ptr)^.SignExponent and F80_MASK16_EXP);
+Mantissa := PFloat80Overlay(Float80Ptr)^.Mantissa;
 // check unsupported encodings...
 If ((Exponent > 0) and (Exponent <= F80_MASK16_EXP)) and ((Mantissa and F80_MASK64_INTB) = 0) then
   begin
@@ -1809,7 +1797,7 @@ end;
     Utility routines - sign-related functions
 -------------------------------------------------------------------------------}
 
-Function Sign(const Value: Float80): TFLoat80ValueSign;
+Function Sign(const Value: Float80): TFloat80ValueSign;
 var
   _Value: TFloat80Overlay absolute Value;
 begin
