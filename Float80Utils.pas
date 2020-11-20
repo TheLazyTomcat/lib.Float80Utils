@@ -158,6 +158,8 @@ const
 
   X87SW_SHIFT_TopOfStack = 11;
 
+//------------------------------------------------------------------------------
+
 {
   EmulatedX87StatusWord
 
@@ -193,6 +195,8 @@ const
   X87CW_SHIFT_Precision = 8;
   X87CW_SHIFT_Rounding  = 10;
 
+
+//------------------------------------------------------------------------------
 {
   EmulatedX87ControlWord
 
@@ -207,6 +211,7 @@ Function EmulatedX87ControlWord: Boolean;{$IFDEF CanInline} inline;{$ENDIF}
   Returns current value of control word.
 }
 Function GetX87ControlWord: UInt16;{$IFNDEF PurePascal} register; assembler;{$ENDIF}
+
 {
   SetX87ControlWord
 
@@ -243,25 +248,130 @@ type
 
   TX87ControlFlags = set of TX87ControlFlag;
 
+//------------------------------------------------------------------------------
+{
+  GetX87PrecisionMode
+
+  Returns current value of precision mode from control word.
+}
 Function GetX87PrecisionMode: TX87PrecisionMode;
+
+{
+  SetX87PrecisionMode
+
+  Sets precision mode to a selected NewValue and returns previous value of
+  precision mode.
+}
 Function SetX87PrecisionMode(NewValue: TX87PrecisionMode): TX87PrecisionMode;
 
+//------------------------------------------------------------------------------
+{
+  GetX87RoundingMode
+
+  Returns current value of rounding mode from control word.
+}
 Function GetX87RoundingMode: TX87RoundingMode;
+
+{
+  SetX87RoundingMode
+
+  Sets rounding mode to a selected NewValue and returns previous value of
+  rounding mode.
+}
 Function SetX87RoundingMode(NewValue: TX87RoundingMode): TX87RoundingMode;
 
+//------------------------------------------------------------------------------
+{
+  GetX87TopOfStack
+
+  Returns current top of the stack pointer from the status word.
+}
 Function GetX87TopOfStack: Integer;
+
+{
+  SetX87TopOfStack
+
+  Sets top of the stack to a selected NewValue and returns previous value of
+  rounding mode.
+
+  WARNING - it does not change the top of the stack when operating on real
+            status register (ie. not in PurePascal mode) as status register is
+            read-only.
+}
 Function SetX87TopOfStack(NewValue: Integer): Integer;
 
+//------------------------------------------------------------------------------
+{
+  GetX87StatusFlag
+
+  Returns current value of selected flag in the status word.
+}
 Function GetX87StatusFlag(Flag: TX87StatusFlag): Boolean;
+
+{
+  SetX87StatusFlag
+
+  Sets value of selected flag in the status word to a NewValue and returns
+  previous state of this flag.
+
+  WARNING - it does not change the flag when operating on real status register
+            (read-only status register).
+}
 Function SetX87StatusFlag(Flag: TX87StatusFlag; NewValue: Boolean): Boolean;
 
+//------------------------------------------------------------------------------
+{
+  GetX87StatusFlags
+
+  Returns status of all flags in the status word. When the flag is set, it is
+  included in the result, when it is clear, it is excluded.
+}
 Function GetX87StatusFlags: TX87StatusFlags;
+
+{
+  SetX87StatusFlags
+
+  Sets new status of all flags in the status word. If a flag is included
+  in the NewValue, it will be set, when it is not included, it will be cleared.
+  Return value is previous state of all status flags.
+
+  WARNING - it does not change any flag when operating on real status register
+            (read-only status register).
+}
 Function SetX87StatusFlags(NewValue: TX87StatusFlags): TX87StatusFlags;
 
+//------------------------------------------------------------------------------
+{
+  GetX87ControlFlag
+
+  Returns current value of selected flag in the control word.
+}
 Function GetX87ControlFlag(Flag: TX87ControlFlag): Boolean;
+
+{
+  SetX87ControlFlag
+
+  Sets value of selected flag in the control word to a NewValue and returns
+  previous state of this flag.
+}
 Function SetX87ControlFlag(Flag: TX87ControlFlag; NewValue: Boolean): Boolean;
 
+//------------------------------------------------------------------------------
+{
+  GetX87ControlFlags
+
+  Returns status of all flags in the control word. When the flag is set, it is
+  included in the result, when it is clear, it is excluded.
+}
 Function GetX87ControlFlags: TX87ControlFlags;
+
+{
+  SetX87ControlFlags
+
+  Sets new status of all flags in the control word. If a flag is included
+  in the NewValue, it will be set, when it is not included, it will be cleared.
+  Return value is previous state of all control flags.
+}
 Function SetX87ControlFlags(NewValue: TX87ControlFlags): TX87ControlFlags;
 
 {-------------------------------------------------------------------------------
@@ -273,20 +383,127 @@ type
 
   TX87Exceptions = set of TX87Exception;
 
+{
+  GetX87ExceptionMask
+
+  Returns current value of selected exception mask bit.
+}
 Function GetX87ExceptionMask(Exception: TX87Exception): Boolean;
+
+{
+  SetX87ExceptionMask
+
+  Sets value of selected exception mask bit in the control word to a NewValue
+  and returns previous value of this bit.
+
+  When the bit is set (true), the slected exception will be masked and not
+  raised on its occurence.
+  When clear (false), the exception is unmasked and can be raised.
+}
 Function SetX87ExceptionMask(Exception: TX87Exception; NewValue: Boolean): Boolean;
 
+//------------------------------------------------------------------------------
+{
+  GetX87ExceptionMasks
+
+  Returns status of all exception mask bits in the control word. When the bit
+  is set, the exception is included in the result, when it is clear, the
+  exception is excluded from the result.
+}
 Function GetX87ExceptionMasks: TX87Exceptions;
+
+{
+  SetX87ExceptionMasks
+
+  Sets new value of all exception mask bits in the control word. If an
+  exception is included in the NewValue, the mask bit will be set, when it is
+  not included, the mask bit will be cleared.
+
+  Return value is previous state of all exception mask bits.
+}
 Function SetX87ExceptionMasks(NewValue: TX87Exceptions): TX87Exceptions;
 
+//------------------------------------------------------------------------------
+{
+  GetX87ExceptionState
+
+  Returns status of all exception status bits in the status word. When the bit
+  is set, the exception is included in the result, when it is clear, the
+  exception is excluded from the result.
+}
 Function GetX87ExceptionState(Exception: TX87Exception): Boolean;
+
+{
+  SetX87ExceptionState
+
+  Sets new value of all exception status bits in the status word. If an
+  exception is included in the NewValue, the status bit will be set, when it is
+  not included, the status bit will be cleared.
+
+  Return value is previous state of all exception status bits.
+
+  WARNING - changes nothing when operating on real status register as it is
+            read-only.
+}
 Function SetX87ExceptionState(Exception: TX87Exception; NewValue: Boolean): Boolean;
 
+//------------------------------------------------------------------------------
+{
+  GetX87ExceptionStates
+
+  Returns status of all exception status bits in the status word. When the bit
+  is set, the exception is included in the result, when it is clear, the
+  exception is excluded from the result.
+}
 Function GetX87ExceptionStates: TX87Exceptions;
+
+{
+  SetX87ExceptionMasks
+
+  Sets new value of all exception status bits in the status word. If an
+  exception is included in the NewValue, the status bit will be set, when it is
+  not included, the status bit will be cleared.
+
+  Return value is previous state of all exception status bits.
+
+  WARNING - changes nothing when operating on real status register.
+}
 Function SetX87ExceptionStates(NewValue: TX87Exceptions): TX87Exceptions;
 
+//------------------------------------------------------------------------------
+{
+  ClearX87Exceptions
+
+  In PurePascal it completely clears the status word (resets all exception
+  status bits, sets top of stack to 0, clears all condition codes and other
+  flags)
+
+  When operating on real status register, it just executes FCLEX instruction
+  (it clears exception status bits, FPU busy flag, summary status flag and
+  stack fault flag, condition codes and top of the stack are undefined).
+}
 procedure ClearX87Exceptions;{$IFNDEF PurePascal} register; assembler;{$ENDIF}
-procedure RaiseX87Exceptions;
+
+{
+  RaiseX87Exceptions
+
+  Raises first encountered exception according to flags set in the passed
+  status word.
+
+  The exception status bits are traversed one by one and, when a set bit is
+  encountered, it is cleared and a corresponding exception is raised.
+  Only one exception is raised in each call, even when multiple bits are set.
+  The order in which the bits are traversed and therefore the order of
+  exceptions raising is:
+
+    InvalidOP/StackUnderflow/StackOverflow (they all fall in one group)
+    Denormal
+    DivByZero
+    Underflow
+    Overflow
+    Precision
+}
+procedure RaiseX87Exceptions(var StatusWord: UInt16);
 
 {===============================================================================
 --------------------------------------------------------------------------------
@@ -1043,32 +1260,45 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure RaiseX87Exceptions;
-var
-  SW: UInt16;
+procedure RaiseX87Exceptions(var StatusWord: UInt16);
 begin
-SW := GetX87StatusWord;
-If (SW and X87SW_EX_InvalidOP) <> 0 then
+If (StatusWord and X87SW_EX_InvalidOP) <> 0 then
   begin
-    If (SW and X87SW_StackFault) <> 0 then
+    StatusWord := StatusWord and not X87SW_EX_InvalidOP;
+    If (StatusWord and X87SW_StackFault) <> 0 then
       begin
-        If (SW and X87SW_ConditionCode_C1) <> 0 then
+        If (StatusWord and X87SW_ConditionCode_C1) <> 0 then
           raise EF80StackOverflow.CreateDefMsg
         else
           raise EF80StackUnderflow.CreateDefMsg;
       end
     else raise EF80InvalidOp.CreateDefMsg;
   end;
-If (SW and X87SW_EX_Denormal) <> 0 then
-  raise EF80Denormal.CreateDefMsg;
-If (SW and X87SW_EX_DivByZero) <> 0 then
-  raise EF80DivByZero.CreateDefMsg;
-If (SW and X87SW_EX_Overflow) <> 0 then
-  raise EF80Overflow.CreateDefMsg;
-If (SW and X87SW_EX_Underflow) <> 0 then
-  raise EF80Underflow.CreateDefMsg;
-If (SW and X87SW_EX_Precision) <> 0 then
-  raise EF80Precision.CreateDefMsg;
+If (StatusWord and X87SW_EX_Denormal) <> 0 then
+  begin
+    StatusWord := StatusWord and not X87SW_EX_Denormal;
+    raise EF80Denormal.CreateDefMsg;
+  end;
+If (StatusWord and X87SW_EX_DivByZero) <> 0 then
+  begin
+    StatusWord := StatusWord and not X87SW_EX_DivByZero;
+    raise EF80DivByZero.CreateDefMsg;
+  end;
+If (StatusWord and X87SW_EX_Overflow) <> 0 then
+  begin
+    StatusWord := StatusWord and not X87SW_EX_Overflow;
+    raise EF80Overflow.CreateDefMsg;
+  end;
+If (StatusWord and X87SW_EX_Underflow) <> 0 then
+  begin
+    StatusWord := StatusWord and not X87SW_EX_Underflow;
+    raise EF80Underflow.CreateDefMsg;
+  end;
+If (StatusWord and X87SW_EX_Precision) <> 0 then
+  begin
+    StatusWord := StatusWord and not X87SW_EX_Precision;
+    raise EF80Precision.CreateDefMsg;
+  end;
 end;
 
 
@@ -1463,8 +1693,13 @@ If ((Exponent > 0) and (Exponent <= F80_MASK16_EXP)) and ((Mantissa and F80_MASK
   }
     If GetX87ExceptionMask(excInvalidOP) then
       begin
-        // return negative QNaN (QNaN floating point indefinite)
-        PUInt64(Float64Ptr)^ := F64_MASK_SIGN or F64_MASK_EXP or F64_MASK_FHB;
+      {
+        return negative QNaN (QNaN floating point indefinite)
+
+        the constants are casted to UInt64 because older FPC is throwing
+        nonsensical error without it
+      }
+        PUInt64(Float64Ptr)^ := UInt64(F64_MASK_SIGN or F64_MASK_EXP or F64_MASK_FHB);
         SetX87ExceptionState(excInvalidOP,True)
       end
     else raise EF80InvalidOP.CreateDefMsg;
