@@ -119,15 +119,15 @@ uses
 ===============================================================================}
 
 type
-  EF80Exception = class(Exception);
+  EF80UException = class(Exception);
 
-  EF80InvalidFlag  = class(EF80Exception);
+  EF80UInvalidFlag = class(EF80UException);
 
 {-------------------------------------------------------------------------------
     Library-specific exceptions - FPU exceptions
 -------------------------------------------------------------------------------}
 type
-  EF80FPUException = class(EF80Exception)
+  EF80UFPUException = class(EF80UException)
   protected
     Function DefaultMessage: String; virtual; abstract;
   public
@@ -135,48 +135,48 @@ type
   end;
 
   // FPU stack errors
-  EF80StackFault = class(EF80FPUException);
+  EF80UStackFault = class(EF80UFPUException);
 
 {-------------------------------------------------------------------------------
     Library-specific exceptions - individual FPU exception classes
 -------------------------------------------------------------------------------}
 type
-  EF80StackOverflow = class(EF80StackFault)
+  EF80UStackOverflow = class(EF80UStackFault)
   protected
     Function DefaultMessage: String; override;
   end;
 
-  EF80StackUnderflow = class(EF80StackFault)
+  EF80UStackUnderflow = class(EF80UStackFault)
   protected
     Function DefaultMessage: String; override;
   end;
 
-  EF80InvalidOp = class(EF80FPUException) // invalid operation/operand
+  EF80UInvalidOp = class(EF80UFPUException) // invalid operation/operand
   protected
     Function DefaultMessage: String; override;
   end;
 
-  EF80Denormal = class(EF80FPUException)
+  EF80UDenormal = class(EF80UFPUException)
   protected
     Function DefaultMessage: String; override;
   end;
 
-  EF80DivByZero = class(EF80FPUException)
+  EF80UDivByZero = class(EF80UFPUException)
   protected
     Function DefaultMessage: String; override;
   end;
 
-  EF80Overflow = class(EF80FPUException)
+  EF80UOverflow = class(EF80UFPUException)
   protected
     Function DefaultMessage: String; override;
   end;
 
-  EF80Underflow = class(EF80FPUException)
+  EF80UUnderflow = class(EF80UFPUException)
   protected
     Function DefaultMessage: String; override;
   end;
 
-  EF80Precision = class(EF80FPUException)
+  EF80UPrecision = class(EF80UFPUException)
   protected
     Function DefaultMessage: String; override;
   end;
@@ -641,7 +641,7 @@ type
   TFloat80ValueSign = -1..1;
 
 {
-  Following three routines will raise and EF80InvalidOp exception when an
+  Following three routines will raise and EF80UInvalidOp exception when an
   invalidly encoded number is passed.
 }
 Function Sign(const Value: Float80): TFloat80ValueSign;
@@ -718,7 +718,7 @@ const
     Library-specific exceptions - FPU exceptions
 -------------------------------------------------------------------------------}
 
-constructor EF80FPUException.CreateDefMsg;
+constructor EF80UFPUException.CreateDefMsg;
 begin
 Create(DefaultMessage);
 end;
@@ -727,56 +727,56 @@ end;
     Library-specific exceptions - individual FPU exception classes
 -------------------------------------------------------------------------------}
 
-Function EF80StackOverflow.DefaultMessage: String;
+Function EF80UStackOverflow.DefaultMessage: String;
 begin
 Result := 'Floting point unit stack overflow';
 end;
 
 //------------------------------------------------------------------------------
 
-Function EF80StackUnderflow.DefaultMessage: String;
+Function EF80UStackUnderflow.DefaultMessage: String;
 begin
 Result := 'Floting point unit stack underflow';
 end;
 
 //------------------------------------------------------------------------------
 
-Function EF80InvalidOp.DefaultMessage: String;
+Function EF80UInvalidOp.DefaultMessage: String;
 begin
 Result := 'Invalid floating point operand';
 end;
 
 //------------------------------------------------------------------------------
 
-Function EF80Denormal.DefaultMessage: String;
+Function EF80UDenormal.DefaultMessage: String;
 begin
 Result := 'Denormal floating point operand';
 end;
 
 //------------------------------------------------------------------------------
 
-Function EF80DivByZero.DefaultMessage: String;
+Function EF80UDivByZero.DefaultMessage: String;
 begin
 Result := 'Floating point division by zero';
 end;
 
 //------------------------------------------------------------------------------
 
-Function EF80Overflow.DefaultMessage: String;
+Function EF80UOverflow.DefaultMessage: String;
 begin
 Result := 'Floating point arithmetic overflow';
 end;
 
 //------------------------------------------------------------------------------
 
-Function EF80Underflow.DefaultMessage: String;
+Function EF80UUnderflow.DefaultMessage: String;
 begin
 Result := 'Floating point arithmetic underflow';
 end;
 
 //------------------------------------------------------------------------------
 
-Function EF80Precision.DefaultMessage: String;
+Function EF80UPrecision.DefaultMessage: String;
 begin
 Result := 'Inexact floating point result';
 end;
@@ -988,7 +988,7 @@ case Flag of
   sfConditionCodeC2:  Result := (GetX87StatusWord and X87SW_ConditionCode_C2) <> 0;
   sfConditionCodeC3:  Result := (GetX87StatusWord and X87SW_ConditionCode_C3) <> 0;
 else
-  raise EF80InvalidFlag.CreateFmt('GetX87StatusFlag: Invalid flag (%d).',[Ord(Flag)]);
+  raise EF80UInvalidFlag.CreateFmt('GetX87StatusFlag: Invalid flag (%d).',[Ord(Flag)]);
 end;
 end;
 
@@ -1017,7 +1017,7 @@ case Flag of
   sfConditionCodeC2:  SetFlag(X87SW_ConditionCode_C2);
   sfConditionCodeC3:  SetFlag(X87SW_ConditionCode_C3);
 else
-  raise EF80InvalidFlag.CreateFmt('SetX87StatusFlag: Invalid flag (%d).',[Ord(Flag)]);
+  raise EF80UInvalidFlag.CreateFmt('SetX87StatusFlag: Invalid flag (%d).',[Ord(Flag)]);
 end;
 end;
 {$ELSE}
@@ -1046,7 +1046,7 @@ For i := Low(TX87StatusFlag) to High(TX87StatusFlag) do
     sfConditionCodeC2:  If (SW and X87SW_ConditionCode_C2) <> 0 then Include(Result,i);
     sfConditionCodeC3:  If (SW and X87SW_ConditionCode_C3) <> 0 then Include(Result,i);
   else
-    raise EF80InvalidFlag.CreateFmt('GetX87StatusFlags: Invalid flag (%d).',[Ord(i)]);
+    raise EF80UInvalidFlag.CreateFmt('GetX87StatusFlags: Invalid flag (%d).',[Ord(i)]);
   end;
 end;
 
@@ -1088,7 +1088,7 @@ begin
 case Flag of
   cfInfinityControl:  Result := (GetX87ControlWord and X87CW_InfinityControl) <> 0;
 else
-  raise EF80InvalidFlag.CreateFmt('GetX87ControlFlag: Invalid flag (%d).',[Ord(Flag)]);
+  raise EF80UInvalidFlag.CreateFmt('GetX87ControlFlag: Invalid flag (%d).',[Ord(Flag)]);
 end;
 end;
 
@@ -1109,7 +1109,7 @@ Result := GetX87ControlFlag(Flag);
 case Flag of
   cfInfinityControl:  SetFlag(X87CW_InfinityControl);
 else
-  raise EF80InvalidFlag.CreateFmt('SetX87ControlFlag: Invalid flag (%d).',[Ord(Flag)]);
+  raise EF80UInvalidFlag.CreateFmt('SetX87ControlFlag: Invalid flag (%d).',[Ord(Flag)]);
 end;
 end;
 
@@ -1126,7 +1126,7 @@ For i := Low(TX87ControlFlag) to High(TX87ControlFlag) do
   case i of
     cfInfinityControl:  If (CW and X87CW_InfinityControl) <> 0 then Include(Result,i);
   else
-    raise EF80InvalidFlag.CreateFmt('GetX87ControlFlags: Invalid flag (%d).',[Ord(i)]);
+    raise EF80UInvalidFlag.CreateFmt('GetX87ControlFlags: Invalid flag (%d).',[Ord(i)]);
   end;
 end;
 
@@ -1165,7 +1165,7 @@ case Exception of
   excUnderflow: Result := (GetX87ControlWord and X87CW_EMASK_Underflow) <> 0;
   excPrecision: Result := (GetX87ControlWord and X87CW_EMASK_Precision) <> 0;
 else
-  raise EF80InvalidFlag.CreateFmt('GetX87ExceptionMask: Invalid X87 exception (%d).',[Ord(Exception)]);
+  raise EF80UInvalidFlag.CreateFmt('GetX87ExceptionMask: Invalid X87 exception (%d).',[Ord(Exception)]);
 end;
 end;
 
@@ -1191,7 +1191,7 @@ case Exception of
   excUnderflow: SetFlag(X87CW_EMASK_Underflow);
   excPrecision: SetFlag(X87CW_EMASK_Precision);
 else
-  raise EF80InvalidFlag.CreateFmt('SetX87ExceptionMask: Invalid X87 exception (%d).',[Ord(Exception)]);
+  raise EF80UInvalidFlag.CreateFmt('SetX87ExceptionMask: Invalid X87 exception (%d).',[Ord(Exception)]);
 end;
 end;
 
@@ -1213,7 +1213,7 @@ For i := Low(TX87Exception) to High(TX87Exception) do
     excUnderflow: If (CW and X87CW_EMASK_Underflow) <> 0 then Include(Result,i);
     excPrecision: If (CW and X87CW_EMASK_Precision) <> 0 then Include(Result,i);
   else
-    raise EF80InvalidFlag.CreateFmt('GetX87ExceptionMasks: Invalid X87 exception (%d).',[Ord(i)]);
+    raise EF80UInvalidFlag.CreateFmt('GetX87ExceptionMasks: Invalid X87 exception (%d).',[Ord(i)]);
   end;
 end;
 
@@ -1255,7 +1255,7 @@ case Exception of
   excUnderflow: Result := (GetX87StatusWord and X87SW_EX_Underflow) <> 0;
   excPrecision: Result := (GetX87StatusWord and X87SW_EX_Precision) <> 0;
 else
-  raise EF80InvalidFlag.CreateFmt('GetX87ExceptionState: Invalid X87 exception (%d).',[Ord(Exception)]);
+  raise EF80UInvalidFlag.CreateFmt('GetX87ExceptionState: Invalid X87 exception (%d).',[Ord(Exception)]);
 end;
 end;
 
@@ -1283,7 +1283,7 @@ case Exception of
   excUnderflow: SetFlag(X87SW_EX_Underflow);
   excPrecision: SetFlag(X87SW_EX_Precision);
 else
-  raise EF80InvalidFlag.CreateFmt('SetX87ExceptionState: Invalid X87 exception (%d).',[Ord(Exception)]);
+  raise EF80UInvalidFlag.CreateFmt('SetX87ExceptionState: Invalid X87 exception (%d).',[Ord(Exception)]);
 end;
 end;
 {$ELSE}
@@ -1311,7 +1311,7 @@ For i := Low(TX87Exception) to High(TX87Exception) do
     excUnderflow: If (SW and X87SW_EX_Underflow) <> 0 then Include(Result,i);
     excPrecision: If (SW and X87SW_EX_Precision) <> 0 then Include(Result,i);
   else
-    raise EF80InvalidFlag.CreateFmt('GetX87ExceptionStates: Invalid X87 exception (%d).',[Ord(i)]);
+    raise EF80UInvalidFlag.CreateFmt('GetX87ExceptionStates: Invalid X87 exception (%d).',[Ord(i)]);
   end;
 end;
 
@@ -1369,36 +1369,36 @@ If (StatusWord and X87SW_EX_InvalidOP) <> 0 then
     If (StatusWord and X87SW_StackFault) <> 0 then
       begin
         If (StatusWord and X87SW_ConditionCode_C1) <> 0 then
-          raise EF80StackOverflow.CreateDefMsg
+          raise EF80UStackOverflow.CreateDefMsg
         else
-          raise EF80StackUnderflow.CreateDefMsg;
+          raise EF80UStackUnderflow.CreateDefMsg;
       end
-    else raise EF80InvalidOp.CreateDefMsg;
+    else raise EF80UInvalidOp.CreateDefMsg;
   end;
 If (StatusWord and X87SW_EX_Denormal) <> 0 then
   begin
     StatusWord := StatusWord and not X87SW_EX_Denormal;
-    raise EF80Denormal.CreateDefMsg;
+    raise EF80UDenormal.CreateDefMsg;
   end;
 If (StatusWord and X87SW_EX_DivByZero) <> 0 then
   begin
     StatusWord := StatusWord and not X87SW_EX_DivByZero;
-    raise EF80DivByZero.CreateDefMsg;
+    raise EF80UDivByZero.CreateDefMsg;
   end;
 If (StatusWord and X87SW_EX_Overflow) <> 0 then
   begin
     StatusWord := StatusWord and not X87SW_EX_Overflow;
-    raise EF80Overflow.CreateDefMsg;
+    raise EF80UOverflow.CreateDefMsg;
   end;
 If (StatusWord and X87SW_EX_Underflow) <> 0 then
   begin
     StatusWord := StatusWord and not X87SW_EX_Underflow;
-    raise EF80Underflow.CreateDefMsg;
+    raise EF80UUnderflow.CreateDefMsg;
   end;
 If (StatusWord and X87SW_EX_Precision) <> 0 then
   begin
     StatusWord := StatusWord and not X87SW_EX_Precision;
-    raise EF80Precision.CreateDefMsg;
+    raise EF80UPrecision.CreateDefMsg;
   end;
 end;
 
@@ -1613,7 +1613,7 @@ case Exponent of
                 BuildExtendedResult(UInt16(Sign shr 48) or UInt16(Exponent - MantissaShift + 15372),
                                     UInt64(Mantissa shl MantissaShift));
               end
-            else raise EF80Denormal.CreateDefMsg;
+            else raise EF80UDenormal.CreateDefMsg;
           end
         // return signed zero
         else BuildExtendedResult(UInt16(Sign shr 48),0);
@@ -1633,7 +1633,7 @@ case Exponent of
                                         UInt64(Mantissa shl 11) or F80_MASK64_FHB or F80_MASK64_INTB)
                   end
                 // signaling NaN
-                else raise EF80InvalidOp.CreateDefMsg;
+                else raise EF80UInvalidOp.CreateDefMsg;
               end
             // quiet signed NaN with mantissa
             else BuildExtendedResult(UInt16(Sign shr 48) or F80_MASK16_EXP,
@@ -1817,7 +1817,7 @@ If ((Exponent > 0) and (Exponent <= F80_MASK16_EXP)) and ((Mantissa and F80_MASK
         PUInt64(Float64Ptr)^ := UInt64(F64_MASK_SIGN or F64_MASK_EXP or F64_MASK_FHB);
         SetX87ExceptionState(excInvalidOP,True)
       end
-    else raise EF80InvalidOP.CreateDefMsg;
+    else raise EF80UInvalidOP.CreateDefMsg;
   end
 else
   case Exponent of
@@ -1844,11 +1844,11 @@ else
                 If GetX87ExceptionMask(excUnderflow) then
                   SetX87ExceptionState(excUnderflow,True)
                 else
-                  raise EF80Underflow.CreateDefMsg;
+                  raise EF80UUnderflow.CreateDefMsg;
                 If GetX87ExceptionMask(excPrecision) then
                   SetX87ExceptionState(excPrecision,True)
                 else
-                  raise EF80Precision.CreateDefMsg;
+                  raise EF80UPrecision.CreateDefMsg;
               end
             // mantissa of 0 - return signed zero
             else PUInt64(Float64Ptr)^ := Sign;
@@ -1870,11 +1870,11 @@ else
               If GetX87ExceptionMask(excUnderflow) then
                 SetX87ExceptionState(excUnderflow,True)
               else
-                raise EF80Underflow.CreateDefMsg;
+                raise EF80UUnderflow.CreateDefMsg;
               If GetX87ExceptionMask(excPrecision) then
                 SetX87ExceptionState(excPrecision,True)
               else
-                raise EF80Precision.CreateDefMsg;
+                raise EF80UPrecision.CreateDefMsg;
             end;
 
           {
@@ -1903,12 +1903,12 @@ else
                       If GetX87ExceptionMask(excUnderflow) then
                         SetX87ExceptionState(excUnderflow,True)
                       else
-                        raise EF80Underflow.CreateDefMsg;
+                        raise EF80UUnderflow.CreateDefMsg;
                     end;
                   If GetX87ExceptionMask(excPrecision) then
                     SetX87ExceptionState(excPrecision,True)
                   else
-                    raise EF80Precision.CreateDefMsg;
+                    raise EF80UPrecision.CreateDefMsg;
                 end;
             end;
 
@@ -1930,11 +1930,11 @@ else
               If GetX87ExceptionMask(excOverflow) then
                 SetX87ExceptionState(excOverflow,True)
               else
-                raise EF80Overflow.CreateDefMsg;
+                raise EF80UOverflow.CreateDefMsg;
               If GetX87ExceptionMask(excPrecision) then
                 SetX87ExceptionState(excPrecision,True)
               else
-                raise EF80Precision.CreateDefMsg;                
+                raise EF80UPrecision.CreateDefMsg;                
             end;
 
           {
@@ -1954,7 +1954,7 @@ else
                         PUInt64(Float64Ptr)^ := Sign or F64_MASK_EXP or F64_MASK_FHB or (Mantissa shr 11);
                       end
                     // singal NaN
-                    else raise EF80InvalidOP.CreateDefMsg;
+                    else raise EF80UInvalidOP.CreateDefMsg;
                   end
                 // quiet signed NaN with truncated mantissa
                 else PUInt64(Float64Ptr)^ := Sign or F64_MASK_EXP or F64_MASK_FHB or (Mantissa shr 11);
@@ -1982,14 +1982,14 @@ else
         If GetX87ExceptionMask(excOverflow) then
           SetX87ExceptionState(excOverflow,True)
         else
-          raise EF80Overflow.CreateDefMsg;
+          raise EF80UOverflow.CreateDefMsg;
       end;
     If BitsLost then
       begin
         If GetX87ExceptionMask(excPrecision) then
           SetX87ExceptionState(excPrecision,True)
         else
-          raise EF80Precision.CreateDefMsg;
+          raise EF80UPrecision.CreateDefMsg;
       end;
   end;
 end;
@@ -2175,7 +2175,7 @@ If IsValid(Value) then
       end
     else Result := 0;
   end
-else raise EF80InvalidOp.CreateDefMsg;
+else raise EF80UInvalidOp.CreateDefMsg;
 end;
 
 //------------------------------------------------------------------------------
@@ -2190,7 +2190,7 @@ If IsValid(Value) then
     _Result.Mantissa := _Value.Mantissa;
     _Result.SignExponent := _Value.SignExponent and not F80_MASK16_SIGN;
   end
-else raise EF80InvalidOp.CreateDefMsg;
+else raise EF80UInvalidOp.CreateDefMsg;
 end;
 
 //------------------------------------------------------------------------------
@@ -2205,7 +2205,7 @@ If IsValid(Value) then
     _Result.Mantissa := _Value.Mantissa;
     _Result.SignExponent := _Value.SignExponent xor F80_MASK16_SIGN;
   end
-else raise EF80InvalidOp.CreateDefMsg;
+else raise EF80UInvalidOp.CreateDefMsg;
 end;
 
 {-------------------------------------------------------------------------------
