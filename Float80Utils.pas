@@ -33,20 +33,20 @@
     suitable FPU.
     Auxiliray functions are operating on local software implementation of
     status and control word and do not access the hardware.
-    This implementation partially emulates the conversion how its done on x87,
+    This implementation partially emulates the conversion how it is done on x87,
     including exception raising (exception masking and pre- and post-calculation
     nature of exceptions are honored) and changes given by selected rounding
     mode (note that precision mode does not affect conversions even on real x87
     FPU).
-    But remember it is only an emulation, not simulation - there are diferences,
-    notably condition codes are not affected by exceptions, and when raising
-    unmasked exception, the exception status bits are not set, nor are busy and
-    summary flag bits. Top of the stack and stack fault flag are outright
-    ignored.
+    But remember it is only an emulation, not simulation - there are
+    differences, notably condition codes are not affected by exceptions, and
+    when raising an unmasked exception, the exception status bits are not set,
+    summary flag bit is not set both for masked and unmasked exceptions. Top of
+    the stack, busy and stack fault flags are outright ignored.
 
-  Version 1.0 (2020-11-20)
+  Version 1.0 (2020-11-21)
 
-  Last change 2020-11-20
+  Last change 2020-11-21
 
   ©2020 František Milt
 
@@ -80,7 +80,6 @@ unit Float80Utils;
 {$IFDEF Float80_PurePascal}
   {$DEFINE PurePascal}
 {$ENDIF}
-{$DEFINE PurePascal}{$message warn 'threading!!!'}
 
 {$IF not(defined(CPU386) or defined(CPUX86_64) or defined(CPUX64))}
   {$DEFINE PurePascal}
@@ -109,20 +108,11 @@ unit Float80Utils;
 {$ENDIF}
 {$H+}
 
-{
-  InitializeX87CW
-
-  When defined and when PurePascal symbol is not defined
-
-  Defined by default.
-}
-{$DEFINE InitializeX87CW}
-
 interface
 
 uses
   SysUtils,
-  AuxTypes;
+  AuxTypes {contains declaration Float80 type};
 
 {===============================================================================
     Library-specific exceptions - declaration
@@ -288,6 +278,14 @@ procedure SetX87ControlWord(NewValue: UInt16);{$IFNDEF PurePascal} register; ass
   Sets x87 control word to $1372 - denormal, underflow and precision exceptions
   are masked (others are unmasked), precision is set to extended, rounding is
   set to nearest and infinity control bit is 1.
+
+  Call this routine only when the control word is NOT emulated (ie. a real CPU
+  register is used) and the program is compiled so that x87 FPU is not used as
+  primary mean of floating point arithmetics and/or is not automatically
+  initialized (if the control word is $037F - a default value set by F(N)INIT
+  instruction - you can safely assume it was not properly initialized).
+
+  WARNING - the initialization must be done in each execution thread.
 }
 procedure InitX87ControlWord;{$IFDEF CanInline} inline;{$ENDIF}
 
@@ -591,15 +589,23 @@ const
     Conversion routines - declaration
 ===============================================================================}
 
-procedure Float64ToFloat80(Float64Ptr,Float80Ptr: Pointer); overload;{$IFNDEF PurePascal} register; assembler;{$ENDIF}
+procedure Float64ToFloat80(Float64Ptr,Float80Ptr: Pointer);{$IFNDEF PurePascal} register; assembler;{$ENDIF} overload;
 
-Function Float64ToFloat80(Value: Float64): Float80; overload;
+Function Float64ToFloat80(Value: Float64): Float80;{$IFDEF CanInline} inline;{$ENDIF} overload;
+
+procedure DoubleToExtended(DoublePtr,ExtendedPtr: Pointer);{$IFDEF CanInline} inline;{$ENDIF} overload;
+
+Function DoubleToExtended(Value: Float64): Float80;{$IFDEF CanInline} inline;{$ENDIF} overload;
 
 //------------------------------------------------------------------------------
 
-procedure Float80ToFloat64(Float80Ptr,Float64Ptr: Pointer); overload;{$IFNDEF PurePascal} register; assembler;{$ENDIF}
+procedure Float80ToFloat64(Float80Ptr,Float64Ptr: Pointer);{$IFNDEF PurePascal} register; assembler;{$ENDIF} overload;
 
-Function Float80ToFloat64(Value: Float80): Float64; overload;
+Function Float80ToFloat64(Value: Float80): Float64;{$IFDEF CanInline} inline;{$ENDIF} overload;
+
+procedure ExtendedToDouble(ExtendedPtr,DoublePtr: Pointer);{$IFDEF CanInline} inline;{$ENDIF} overload;
+
+Function ExtendedToDouble(Value: Float80): Float64;{$IFDEF CanInline} inline;{$ENDIF} overload;
 
 {===============================================================================
 --------------------------------------------------------------------------------
@@ -657,6 +663,7 @@ Function Neg(const Value: Float80): Float80;
   masked-out and is zero, irrespective of its actual value.
 }
 procedure DecodeFloat80(const Value: Float80; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+procedure DecodeExtended(const Value: Float80; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
 
 {
   EncodeFloat80
@@ -671,6 +678,7 @@ procedure DecodeFloat80(const Value: Float80; out Mantissa: UInt64; out Exponent
   exponent.
 }
 Function EncodeFloat80(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80;
+Function EncodeExtended(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80;{$IFDEF CanInline} inline;{$ENDIF}
 
 implementation
 
@@ -783,7 +791,8 @@ end;
 
 {$IFDEF PurePascal}
 threadvar
-  Pas_X87SW: UInt16;
+  Pas_X87SW:  UInt16;
+  SWInit:     Boolean;  // initalized by the compiler to false
 {$ENDIF}
 
 //------------------------------------------------------------------------------
@@ -806,6 +815,11 @@ asm
 end;
 {$ELSE}
 begin
+If not SWInit then
+  begin
+    Pas_X87SW := 0;
+    SWInit := True;
+  end;
 Result := Pas_X87SW;
 end;
 {$ENDIF}
@@ -816,11 +830,8 @@ end;
 
 {$IFDEF PurePascal}
 threadvar
-{
-  denormal, underflow and precision exceptions are masked, precision set to
-  extended, rounding set to nearest and infinity control bit set
-}
-  Pas_X87CW: UInt16;
+  Pas_X87CW:  UInt16;
+  CWInit:     Boolean;  // initalized by the compiler to false
 {$ENDIF}
 
 //------------------------------------------------------------------------------
@@ -846,6 +857,15 @@ asm
 end;
 {$ELSE}
 begin
+If not CWInit then
+  begin
+  {
+    denormal, underflow and precision exceptions are masked, precision set to
+    extended, rounding set to nearest and infinity control bit set
+  }
+    Pas_X87CW := $1372;
+    CWInit := True;
+  end;
 Result := Pas_X87CW;
 end;
 {$ENDIF}
@@ -863,6 +883,7 @@ end;
 {$ELSE}
 begin
 Pas_X87CW := NewValue;
+CWInit := True;
 end;
 {$ENDIF}
 
@@ -947,7 +968,7 @@ end;
 {$IFNDEF PurePascal}{$IFDEF FPCDWM}{$PUSH}W5024{$ENDIF}{$ENDIF}
 Function SetX87TopOfStack(NewValue: Integer): Integer;
 begin
-Result := GetX87TopOfStack;
+Result := GetX87TopOfStack; // initializes Pas_X87SW
 {$IFDEF PurePascal}
 Pas_X87SW := (Pas_X87SW and not X87SW_TopOfStack) or ((NewValue shl X87SW_SHIFT_TopOfStack) and X87SW_TopOfStack);
 {$ENDIF}
@@ -1334,6 +1355,7 @@ end;
 {$ELSE}
 begin
 Pas_X87SW := 0;
+SWInit := True;
 end;
 {$ENDIF}
 
@@ -1633,6 +1655,20 @@ end;
 Function Float64ToFloat80(Value: Float64): Float80;
 begin
 Float64ToFloat80(@Value,@Result);
+end;
+
+//------------------------------------------------------------------------------
+
+procedure DoubleToExtended(DoublePtr,ExtendedPtr: Pointer);
+begin
+Float64ToFloat80(DoublePtr,ExtendedPtr);
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+Function DoubleToExtended(Value: Float64): Float80;
+begin
+Result := Float64ToFloat80(Value);
 end;
 
 {-------------------------------------------------------------------------------
@@ -1966,6 +2002,19 @@ begin
 Float80ToFloat64(@Value,@Result);
 end;
 
+//------------------------------------------------------------------------------
+
+procedure ExtendedToDouble(ExtendedPtr,DoublePtr: Pointer);
+begin
+Float80ToFloat64(ExtendedPtr,DoublePtr);
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+Function ExtendedToDouble(Value: Float80): Float64;
+begin
+Result := Float80ToFloat64(Value);
+end;
 
 {===============================================================================
 --------------------------------------------------------------------------------
@@ -2180,6 +2229,13 @@ end;
 
 //------------------------------------------------------------------------------
 
+procedure DecodeExtended(const Value: Float80; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+begin
+DecodeFloat80(Value,Mantissa,Exponent,Sign,BiasedExp,IntBit);
+end;
+
+//------------------------------------------------------------------------------
+
 Function EncodeFloat80(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80;
 var
   SignExponent: UInt16;
@@ -2207,15 +2263,11 @@ else
   end;
 end;
 
-initialization
-{$IFDEF PurePascal}
-  Pas_X87SW := 0;
-  Pas_X87CW := $1372;
-{$ELSE}
-{$IFDEF InitializeX87CW}
-  If GetX87ControlWord = $037F then
-    InitX87ControlWord;
-{$ENDIF}
-{$ENDIF}
+//------------------------------------------------------------------------------
+
+Function EncodeExtended(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80;
+begin
+Result := EncodeFloat80(Mantissa,Exponent,Sign,BiasedExp,IntBit);
+end;
 
 end.
