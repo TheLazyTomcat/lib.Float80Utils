@@ -1605,7 +1605,7 @@ case Exponent of
                 change
               }
                 MantissaShift := HighZeroCount(Mantissa);
-                BuildExtendedResult(UInt16(Sign shr 48) or UInt16(Exponent - MantissaShift + 15372),
+                BuildExtendedResult(UInt16(Sign shr 48) or UInt16(15372 - MantissaShift),
                                     UInt64(Mantissa shl MantissaShift));
               end
             else raise EF80UDenormal.CreateDefMsg;
