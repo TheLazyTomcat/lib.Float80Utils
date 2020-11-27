@@ -44,9 +44,9 @@
     summary flag bit is not set both for masked and unmasked exceptions. Top of
     the stack, busy and stack fault flags are outright ignored.
 
-  Version 1.0 (2020-11-21)
+  Version 1.0.1 (2020-11-27)
 
-  Last change 2020-11-21
+  Last change 2020-11-27
 
   ©2020 František Milt
 
@@ -454,7 +454,7 @@ Function GetX87ExceptionMask(Exception: TX87Exception): Boolean;
   Sets value of selected exception mask bit in the control word to a NewValue
   and returns previous value of this bit.
 
-  When the bit is set (true), the slected exception will be masked and not
+  When the bit is set (true), the selected exception will be masked and not
   raised on its occurence.
   When clear (false), the exception is unmasked and can be raised.
 }
@@ -483,61 +483,56 @@ Function SetX87ExceptionMasks(NewValue: TX87Exceptions): TX87Exceptions;
 
 //------------------------------------------------------------------------------
 {
-  GetX87ExceptionState
+  GetX87ExceptionFlag
 
-  Returns status of all exception status bits in the status word. When the bit
-  is set, the exception is included in the result, when it is clear, the
-  exception is excluded from the result.
+  Returns current value of selected exception flag bit.
 }
-Function GetX87ExceptionState(Exception: TX87Exception): Boolean;
+Function GetX87ExceptionFlag(Exception: TX87Exception): Boolean;
 
 {
-  SetX87ExceptionState
+  SetX87ExceptionFlag
 
-  Sets new value of all exception status bits in the status word. If an
-  exception is included in the NewValue, the status bit will be set, when it is
-  not included, the status bit will be cleared.
-
-  Return value is previous state of all exception status bits.
+  Sets value of selected exception flag bit in the status word to a NewValue
+  and returns previous value of this bit.
 
   WARNING - changes nothing when operating on real status register as it is
             read-only.
 }
-Function SetX87ExceptionState(Exception: TX87Exception; NewValue: Boolean): Boolean;
+Function SetX87ExceptionFlag(Exception: TX87Exception; NewValue: Boolean): Boolean;
 
 //------------------------------------------------------------------------------
 {
-  GetX87ExceptionStates
+  GetX87ExceptionFlags
 
-  Returns status of all exception status bits in the status word. When the bit
+  Returns status of all exception flag bits in the status word. When the bit
   is set, the exception is included in the result, when it is clear, the
   exception is excluded from the result.
 }
-Function GetX87ExceptionStates: TX87Exceptions;
+Function GetX87ExceptionFlags: TX87Exceptions;
 
 {
-  SetX87ExceptionMasks
+  SetX87ExceptionFlags
 
-  Sets new value of all exception status bits in the status word. If an
-  exception is included in the NewValue, the status bit will be set, when it is
-  not included, the status bit will be cleared.
+  Sets new value of all exception flag bits in the status word. If an exception
+  is included in the NewValue, the flag bit will be set, when it is not
+  included, the flag bit will be cleared.
 
-  Return value is previous state of all exception status bits.
+  Return value is previous state of all exception flag bits.
 
   WARNING - changes nothing when operating on real status register.
 }
-Function SetX87ExceptionStates(NewValue: TX87Exceptions): TX87Exceptions;
+Function SetX87ExceptionFlags(NewValue: TX87Exceptions): TX87Exceptions;
 
 //------------------------------------------------------------------------------
 {
   ClearX87Exceptions
 
   In PurePascal it completely clears the status word (resets all exception
-  status bits, sets top of stack to 0, clears all condition codes and other
+  flag bits, sets top of stack to 0, clears all condition codes and other
   flags)
 
   When operating on real status register, it just executes FCLEX instruction
-  (it clears exception status bits, FPU busy flag, summary status flag and
+  (it clears exception flag bits, FPU busy flag, summary status flag and
   stack fault flag, condition codes and top of the stack are undefined).
 }
 procedure ClearX87Exceptions;{$IFNDEF PurePascal} register; assembler;{$ENDIF}
@@ -548,7 +543,7 @@ procedure ClearX87Exceptions;{$IFNDEF PurePascal} register; assembler;{$ENDIF}
   Raises first encountered exception according to flags set in the passed
   status word.
 
-  The exception status bits are traversed one by one and, when a set bit is
+  The exception flag bits are traversed one by one and, when a set bit is
   encountered, it is cleared and a corresponding exception is raised.
   Only one exception is raised in each call, even when multiple bits are set.
   The order in which the bits are traversed and therefore the order of
@@ -998,24 +993,24 @@ end;
 Function SetX87StatusFlag(Flag: TX87StatusFlag; NewValue: Boolean): Boolean;
 {$IFDEF PurePascal}
 
-  procedure SetFlag(FlagMask: UInt16);
+  procedure SetBit(BitMask: UInt16);
   begin
     If NewValue then
-      Pas_X87SW:= Pas_X87SW or FlagMask
+      Pas_X87SW:= Pas_X87SW or BitMask
     else
-      Pas_X87SW:= Pas_X87SW and not FlagMask;
+      Pas_X87SW:= Pas_X87SW and not BitMask;
   end;
 
 begin
 Result := GetX87StatusFlag(Flag);
 case Flag of
-  sfStackFault:       SetFlag(X87SW_StackFault);
-  sfExceptionSummary: SetFlag(X87SW_ExceptionSummary);
-  sfFPUBusy:          SetFlag(X87SW_FPUBusy);
-  sfConditionCodeC0:  SetFlag(X87SW_ConditionCode_C0);
-  sfConditionCodeC1:  SetFlag(X87SW_ConditionCode_C1);
-  sfConditionCodeC2:  SetFlag(X87SW_ConditionCode_C2);
-  sfConditionCodeC3:  SetFlag(X87SW_ConditionCode_C3);
+  sfStackFault:       SetBit(X87SW_StackFault);
+  sfExceptionSummary: SetBit(X87SW_ExceptionSummary);
+  sfFPUBusy:          SetBit(X87SW_FPUBusy);
+  sfConditionCodeC0:  SetBit(X87SW_ConditionCode_C0);
+  sfConditionCodeC1:  SetBit(X87SW_ConditionCode_C1);
+  sfConditionCodeC2:  SetBit(X87SW_ConditionCode_C2);
+  sfConditionCodeC3:  SetBit(X87SW_ConditionCode_C3);
 else
   raise EF80UInvalidFlag.CreateFmt('SetX87StatusFlag: Invalid flag (%d).',[Ord(Flag)]);
 end;
@@ -1056,23 +1051,23 @@ end;
 Function SetX87StatusFlags(NewValue: TX87StatusFlags): TX87StatusFlags;
 {$IFDEF PurePascal}
 
-  procedure SetFlag(FlagMask: UInt16; NewState: Boolean);
+  procedure SetBit(BitMask: UInt16; NewState: Boolean);
   begin
     If NewState then
-      Pas_X87SW := Pas_X87SW or FlagMask
+      Pas_X87SW := Pas_X87SW or BitMask
     else
-      Pas_X87SW := Pas_X87SW and not FlagMask;
+      Pas_X87SW := Pas_X87SW and not BitMask;
   end;
 
 begin
 Result := GetX87StatusFlags;
-SetFlag(X87SW_StackFault,sfStackFault in NewValue);
-SetFlag(X87SW_ExceptionSummary,sfExceptionSummary in NewValue);
-SetFlag(X87SW_FPUBusy,sfFPUBusy in NewValue);
-SetFlag(X87SW_ConditionCode_C0,sfConditionCodeC0 in NewValue);
-SetFlag(X87SW_ConditionCode_C1,sfConditionCodeC1 in NewValue);
-SetFlag(X87SW_ConditionCode_C2,sfConditionCodeC2 in NewValue);
-SetFlag(X87SW_ConditionCode_C3,sfConditionCodeC3 in NewValue);
+SetBit(X87SW_StackFault,sfStackFault in NewValue);
+SetBit(X87SW_ExceptionSummary,sfExceptionSummary in NewValue);
+SetBit(X87SW_FPUBusy,sfFPUBusy in NewValue);
+SetBit(X87SW_ConditionCode_C0,sfConditionCodeC0 in NewValue);
+SetBit(X87SW_ConditionCode_C1,sfConditionCodeC1 in NewValue);
+SetBit(X87SW_ConditionCode_C2,sfConditionCodeC2 in NewValue);
+SetBit(X87SW_ConditionCode_C3,sfConditionCodeC3 in NewValue);
 end;
 {$ELSE}
 begin
@@ -1096,18 +1091,18 @@ end;
 
 Function SetX87ControlFlag(Flag: TX87ControlFlag; NewValue: Boolean): Boolean;
 
-  procedure SetFlag(FlagMask: UInt16);
+  procedure SetBit(BitMask: UInt16);
   begin
     If NewValue then
-      SetX87ControlWord(GetX87ControlWord or FlagMask)
+      SetX87ControlWord(GetX87ControlWord or BitMask)
     else
-      SetX87ControlWord(GetX87ControlWord and not FlagMask);
+      SetX87ControlWord(GetX87ControlWord and not BitMask);
   end;
 
 begin
 Result := GetX87ControlFlag(Flag);
 case Flag of
-  cfInfinityControl:  SetFlag(X87CW_InfinityControl);
+  cfInfinityControl:  SetBit(X87CW_InfinityControl);
 else
   raise EF80UInvalidFlag.CreateFmt('SetX87ControlFlag: Invalid flag (%d).',[Ord(Flag)]);
 end;
@@ -1136,18 +1131,18 @@ Function SetX87ControlFlags(NewValue: TX87ControlFlags): TX87ControlFlags;
 var
   CW: UInt16;
 
-  procedure SetFlag(FlagMask: UInt16; NewState: Boolean);
+  procedure SetBit(BitMask: UInt16; NewState: Boolean);
   begin
     If NewState then
-      CW := CW or FlagMask
+      CW := CW or BitMask
     else
-      CW := CW and not FlagMask;
+      CW := CW and not BitMask;
   end;
 
 begin
 Result := GetX87ControlFlags;
 CW := GetX87ControlWord;
-SetFlag(X87CW_InfinityControl,cfInfinityControl in NewValue);
+SetBit(X87CW_InfinityControl,cfInfinityControl in NewValue);
 SetX87ControlWord(CW);
 end;
 
@@ -1173,23 +1168,23 @@ end;
 
 Function SetX87ExceptionMask(Exception: TX87Exception; NewValue: Boolean): Boolean;
 
-  procedure SetFlag(ExceptionMask: UInt16);
+  procedure SetBit(BitMask: UInt16);
   begin
     If NewValue then
-      SetX87ControlWord(GetX87ControlWord or ExceptionMask)
+      SetX87ControlWord(GetX87ControlWord or BitMask)
     else
-      SetX87ControlWord(GetX87ControlWord and not ExceptionMask);
+      SetX87ControlWord(GetX87ControlWord and not BitMask);
   end;
 
 begin
 Result := GetX87ExceptionMask(Exception);
 case Exception of
-  excInvalidOp: SetFlag(X87CW_EMASK_InvalidOP);
-  excDenormal:  SetFlag(X87CW_EMASK_Denormal);
-  excDivByZero: SetFlag(X87CW_EMASK_DivByZero);
-  excOverflow:  SetFlag(X87CW_EMASK_Overflow);
-  excUnderflow: SetFlag(X87CW_EMASK_Underflow);
-  excPrecision: SetFlag(X87CW_EMASK_Precision);
+  excInvalidOp: SetBit(X87CW_EMASK_InvalidOP);
+  excDenormal:  SetBit(X87CW_EMASK_Denormal);
+  excDivByZero: SetBit(X87CW_EMASK_DivByZero);
+  excOverflow:  SetBit(X87CW_EMASK_Overflow);
+  excUnderflow: SetBit(X87CW_EMASK_Underflow);
+  excPrecision: SetBit(X87CW_EMASK_Precision);
 else
   raise EF80UInvalidFlag.CreateFmt('SetX87ExceptionMask: Invalid X87 exception (%d).',[Ord(Exception)]);
 end;
@@ -1223,29 +1218,29 @@ Function SetX87ExceptionMasks(NewValue: TX87Exceptions): TX87Exceptions;
 var
   CW: UInt16;
 
-  procedure SetFlag(ExceptionMask: UInt16; NewState: Boolean);
+  procedure SetBit(BitMask: UInt16; NewState: Boolean);
   begin
     If NewState then
-      CW := CW or ExceptionMask
+      CW := CW or BitMask
     else
-      CW := CW and not ExceptionMask;
+      CW := CW and not BitMask;
   end;
 
 begin
 Result := GetX87ExceptionMasks;
 CW := GetX87ControlWord;
-SetFlag(X87CW_EMASK_InvalidOP,excInvalidOp in NewValue);
-SetFlag(X87CW_EMASK_Denormal,excDenormal in NewValue);
-SetFlag(X87CW_EMASK_DivByZero,excDivByZero in NewValue);
-SetFlag(X87CW_EMASK_Overflow,excOverflow in NewValue);
-SetFlag(X87CW_EMASK_Underflow,excUnderflow in NewValue);
-SetFlag(X87CW_EMASK_Precision,excPrecision in NewValue);
+SetBit(X87CW_EMASK_InvalidOP,excInvalidOp in NewValue);
+SetBit(X87CW_EMASK_Denormal,excDenormal in NewValue);
+SetBit(X87CW_EMASK_DivByZero,excDivByZero in NewValue);
+SetBit(X87CW_EMASK_Overflow,excOverflow in NewValue);
+SetBit(X87CW_EMASK_Underflow,excUnderflow in NewValue);
+SetBit(X87CW_EMASK_Precision,excPrecision in NewValue);
 SetX87ControlWord(CW);
 end;
 
 //------------------------------------------------------------------------------
 
-Function GetX87ExceptionState(Exception: TX87Exception): Boolean;
+Function GetX87ExceptionFlag(Exception: TX87Exception): Boolean;
 begin
 case Exception of
   excInvalidOp: Result := (GetX87StatusWord and X87SW_EX_InvalidOP) <> 0;
@@ -1255,47 +1250,47 @@ case Exception of
   excUnderflow: Result := (GetX87StatusWord and X87SW_EX_Underflow) <> 0;
   excPrecision: Result := (GetX87StatusWord and X87SW_EX_Precision) <> 0;
 else
-  raise EF80UInvalidFlag.CreateFmt('GetX87ExceptionState: Invalid X87 exception (%d).',[Ord(Exception)]);
+  raise EF80UInvalidFlag.CreateFmt('GetX87ExceptionFlag: Invalid X87 exception (%d).',[Ord(Exception)]);
 end;
 end;
 
 //------------------------------------------------------------------------------
 
 {$IFNDEF PurePascal}{$IFDEF FPCDWM}{$PUSH}W5024{$ENDIF}{$ENDIF}
-Function SetX87ExceptionState(Exception: TX87Exception; NewValue: Boolean): Boolean;
+Function SetX87ExceptionFlag(Exception: TX87Exception; NewValue: Boolean): Boolean;
 {$IFDEF PurePascal}
 
-  procedure SetFlag(ExceptionMask: UInt16);
+  procedure SetBit(BitMask: UInt16);
   begin
     If NewValue then
-      Pas_X87SW := Pas_X87SW or ExceptionMask
+      Pas_X87SW := Pas_X87SW or BitMask
     else
-      Pas_X87SW := Pas_X87SW and not ExceptionMask
+      Pas_X87SW := Pas_X87SW and not BitMask
   end;
 
 begin
-Result := GetX87ExceptionState(Exception);
+Result := GetX87ExceptionFlag(Exception);
 case Exception of
-  excInvalidOp: SetFlag(X87SW_EX_InvalidOP);
-  excDenormal:  SetFlag(X87SW_EX_Denormal);
-  excDivByZero: SetFlag(X87SW_EX_DivByZero);
-  excOverflow:  SetFlag(X87SW_EX_Overflow);
-  excUnderflow: SetFlag(X87SW_EX_Underflow);
-  excPrecision: SetFlag(X87SW_EX_Precision);
+  excInvalidOp: SetBit(X87SW_EX_InvalidOP);
+  excDenormal:  SetBit(X87SW_EX_Denormal);
+  excDivByZero: SetBit(X87SW_EX_DivByZero);
+  excOverflow:  SetBit(X87SW_EX_Overflow);
+  excUnderflow: SetBit(X87SW_EX_Underflow);
+  excPrecision: SetBit(X87SW_EX_Precision);
 else
-  raise EF80UInvalidFlag.CreateFmt('SetX87ExceptionState: Invalid X87 exception (%d).',[Ord(Exception)]);
+  raise EF80UInvalidFlag.CreateFmt('SetX87ExceptionFlag: Invalid X87 exception (%d).',[Ord(Exception)]);
 end;
 end;
 {$ELSE}
 begin
-Result := GetX87ExceptionState(Exception);
+Result := GetX87ExceptionFlag(Exception);
 end;
 {$ENDIF}
 {$IFNDEF PurePascal}{$IFDEF FPCDWM}{$POP}{$ENDIF}{$ENDIF}
 
 //------------------------------------------------------------------------------
 
-Function GetX87ExceptionStates: TX87Exceptions;
+Function GetX87ExceptionFlags: TX87Exceptions;
 var
   SW: UInt16;
   i:  TX87Exception;
@@ -1311,36 +1306,36 @@ For i := Low(TX87Exception) to High(TX87Exception) do
     excUnderflow: If (SW and X87SW_EX_Underflow) <> 0 then Include(Result,i);
     excPrecision: If (SW and X87SW_EX_Precision) <> 0 then Include(Result,i);
   else
-    raise EF80UInvalidFlag.CreateFmt('GetX87ExceptionStates: Invalid X87 exception (%d).',[Ord(i)]);
+    raise EF80UInvalidFlag.CreateFmt('GetX87ExceptionFlags: Invalid X87 exception (%d).',[Ord(i)]);
   end;
 end;
 
 //------------------------------------------------------------------------------
 
 {$IFNDEF PurePascal}{$IFDEF FPCDWM}{$PUSH}W5024{$ENDIF}{$ENDIF}
-Function SetX87ExceptionStates(NewValue: TX87Exceptions): TX87Exceptions;
+Function SetX87ExceptionFlags(NewValue: TX87Exceptions): TX87Exceptions;
 {$IFDEF PurePascal}
 
-  procedure SetFlag(ExceptionMask: UInt16; NewState: Boolean);
+  procedure SetBit(BitMask: UInt16; NewState: Boolean);
   begin
     If NewState then
-      Pas_X87SW := Pas_X87SW or ExceptionMask
+      Pas_X87SW := Pas_X87SW or BitMask
     else
-      Pas_X87SW := Pas_X87SW and not ExceptionMask;
+      Pas_X87SW := Pas_X87SW and not BitMask;
   end;
 
 begin
-Result := GetX87ExceptionStates;
-SetFlag(X87SW_EX_InvalidOP,excInvalidOp in NewValue);
-SetFlag(X87SW_EX_Denormal,excDenormal in NewValue);
-SetFlag(X87SW_EX_DivByZero,excDivByZero in NewValue);
-SetFlag(X87SW_EX_Overflow,excOverflow in NewValue);
-SetFlag(X87SW_EX_Underflow,excUnderflow in NewValue);
-SetFlag(X87SW_EX_Precision,excPrecision in NewValue);
+Result := GetX87ExceptionFlags;
+SetBit(X87SW_EX_InvalidOP,excInvalidOp in NewValue);
+SetBit(X87SW_EX_Denormal,excDenormal in NewValue);
+SetBit(X87SW_EX_DivByZero,excDivByZero in NewValue);
+SetBit(X87SW_EX_Overflow,excOverflow in NewValue);
+SetBit(X87SW_EX_Underflow,excUnderflow in NewValue);
+SetBit(X87SW_EX_Precision,excPrecision in NewValue);
 end;
 {$ELSE}
 begin
-Result := GetX87ExceptionStates;
+Result := GetX87ExceptionFlags;
 end;
 {$ENDIF}
 {$IFNDEF PurePascal}{$IFDEF FPCDWM}{$POP}{$ENDIF}{$ENDIF}
@@ -1601,7 +1596,7 @@ case Exponent of
             // denormal
             If GetX87ExceptionMask(excDenormal) then
               begin
-                SetX87ExceptionState(excDenormal,True);
+                SetX87ExceptionFlag(excDenormal,True);
               {
                 normalize...
 
@@ -1627,7 +1622,7 @@ case Exponent of
                 // signaled NaN
                 If GetX87ExceptionMask(excInvalidOp) then
                   begin
-                    SetX87ExceptionState(excInvalidOp,True);
+                    SetX87ExceptionFlag(excInvalidOp,True);
                     // quiet signed NaN with mantissa
                     BuildExtendedResult(UInt16(Sign shr 48) or F80_MASK16_EXP,
                                         UInt64(Mantissa shl 11) or F80_MASK64_FHB or F80_MASK64_INTB)
@@ -1815,7 +1810,7 @@ If ((Exponent > 0) and (Exponent <= F80_MASK16_EXP)) and ((Mantissa and F80_MASK
         nonsensical error without it
       }
         PUInt64(Float64Ptr)^ := UInt64(F64_MASK_SIGN or F64_MASK_EXP or F64_MASK_FHB);
-        SetX87ExceptionState(excInvalidOP,True)
+        SetX87ExceptionFlag(excInvalidOP,True)
       end
     else raise EF80UInvalidOP.CreateDefMsg;
   end
@@ -1842,11 +1837,11 @@ else
                   PUInt64(Float64Ptr)^ := Sign;
                 // post-computation exceptions
                 If GetX87ExceptionMask(excUnderflow) then
-                  SetX87ExceptionState(excUnderflow,True)
+                  SetX87ExceptionFlag(excUnderflow,True)
                 else
                   raise EF80UUnderflow.CreateDefMsg;
                 If GetX87ExceptionMask(excPrecision) then
-                  SetX87ExceptionState(excPrecision,True)
+                  SetX87ExceptionFlag(excPrecision,True)
                 else
                   raise EF80UPrecision.CreateDefMsg;
               end
@@ -1868,11 +1863,11 @@ else
                 PUInt64(Float64Ptr)^ := Sign;
               // post-computation exceptions
               If GetX87ExceptionMask(excUnderflow) then
-                SetX87ExceptionState(excUnderflow,True)
+                SetX87ExceptionFlag(excUnderflow,True)
               else
                 raise EF80UUnderflow.CreateDefMsg;
               If GetX87ExceptionMask(excPrecision) then
-                SetX87ExceptionState(excPrecision,True)
+                SetX87ExceptionFlag(excPrecision,True)
               else
                 raise EF80UPrecision.CreateDefMsg;
             end;
@@ -1901,12 +1896,12 @@ else
                     begin
                       // number was NOT converted to normalized encoding
                       If GetX87ExceptionMask(excUnderflow) then
-                        SetX87ExceptionState(excUnderflow,True)
+                        SetX87ExceptionFlag(excUnderflow,True)
                       else
                         raise EF80UUnderflow.CreateDefMsg;
                     end;
                   If GetX87ExceptionMask(excPrecision) then
-                    SetX87ExceptionState(excPrecision,True)
+                    SetX87ExceptionFlag(excPrecision,True)
                   else
                     raise EF80UPrecision.CreateDefMsg;
                 end;
@@ -1928,11 +1923,11 @@ else
                 PUInt64(Float64Ptr)^ := Sign or F64_MASK_EXP;
               // post-computation exceptions
               If GetX87ExceptionMask(excOverflow) then
-                SetX87ExceptionState(excOverflow,True)
+                SetX87ExceptionFlag(excOverflow,True)
               else
                 raise EF80UOverflow.CreateDefMsg;
               If GetX87ExceptionMask(excPrecision) then
-                SetX87ExceptionState(excPrecision,True)
+                SetX87ExceptionFlag(excPrecision,True)
               else
                 raise EF80UPrecision.CreateDefMsg;                
             end;
@@ -1950,7 +1945,7 @@ else
                     If GetX87ExceptionMask(excInvalidOP) then
                       begin
                         // return quiet signed NaN with truncated mantissa
-                        SetX87ExceptionState(excInvalidOP,True);
+                        SetX87ExceptionFlag(excInvalidOP,True);
                         PUInt64(Float64Ptr)^ := Sign or F64_MASK_EXP or F64_MASK_FHB or (Mantissa shr 11);
                       end
                     // singal NaN
@@ -1980,14 +1975,14 @@ else
       begin
         // number was converted to infinity
         If GetX87ExceptionMask(excOverflow) then
-          SetX87ExceptionState(excOverflow,True)
+          SetX87ExceptionFlag(excOverflow,True)
         else
           raise EF80UOverflow.CreateDefMsg;
       end;
     If BitsLost then
       begin
         If GetX87ExceptionMask(excPrecision) then
-          SetX87ExceptionState(excPrecision,True)
+          SetX87ExceptionFlag(excPrecision,True)
         else
           raise EF80UPrecision.CreateDefMsg;
       end;
