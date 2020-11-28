@@ -46,7 +46,7 @@
 
   Version 1.0.1 (2020-11-27)
 
-  Last change 2020-11-27
+  Last change 2020-11-28
 
   ©2020 František Milt
 
@@ -1701,9 +1701,9 @@ var
       begin
         Value65 := UInt65Get(Value,0);
         Mask := UInt65RShift(UInt65Get(UInt64($FFFFFFFFFFFFFFFF),0),64 - Shift);
-        If not UInt65IsZero(UInt65And(UInt65Get(Value,0),Mask)) then
+        If not UInt65IsZero(UInt65And(Value65,Mask)) then
           begin
-            DataLoss := not UInt65IsZero(UInt65And(Value65,Mask));          
+            DataLoss := True;
             Low := UInt65And(Value65,UInt65Not(Mask));
             High := UInt65Add(Low,UInt65Add(Mask,UInt65Get(1,0))); 
             case RoundMode of
@@ -1755,7 +1755,7 @@ var
     DataLoss := False;
     If (Value and SM_MASK) <> 0 then
       begin
-        DataLoss := (Value and SM_MASK) <> 0;
+        DataLoss := True;
         Low := Value and not SM_MASK;
         High := Low + (SM_MASK + 1);
         case RoundMode of
