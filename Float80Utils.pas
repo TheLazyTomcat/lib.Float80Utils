@@ -44,9 +44,9 @@
     summary flag bit is not set both for masked and unmasked exceptions. Top of
     the stack, busy and stack fault flags are outright ignored.
 
-  Version 1.0.1 (2020-11-27)
+  Version 1.0.2 (2020-12-01)
 
-  Last change 2020-11-28
+  Last change 2020-12-01
 
   ©2020 František Milt
 
@@ -1682,6 +1682,7 @@ var
   Exponent:     Int32;    // biased exponent (bias 16383)
   Mantissa:     UInt64;   // including integer bit
   RoundMode:    TX87RoundingMode;
+  ResultTemp:   UInt64;
   BitsLost:     Boolean;
   ManOverflow:  Boolean;
 
@@ -1789,6 +1790,22 @@ var
     else Result := Value shr 11;
   end;
 
+  procedure ExceptionSetOrRaise(Exception: TX87Exception);
+  begin
+    If not GetX87ExceptionMask(Exception) then
+      case Exception of
+        excDenormal:  raise EF80UDenormal.CreateDefMsg;
+        excDivByZero: raise EF80UDivByZero.CreateDefMsg;
+        excOverflow:  raise EF80UOverflow.CreateDefMsg;
+        excUnderflow: raise EF80UUnderflow.CreateDefMsg;
+        excPrecision: raise EF80UPrecision.CreateDefMsg;
+      else
+       {excInvalidOp}
+        raise EF80UInvalidOP.CreateDefMsg;
+      end
+    else SetX87ExceptionFlag(Exception,True);
+  end;
+
 begin
 RoundMode := GetX87RoundingMode;
 Sign := UInt64(PFloat80Overlay(Float80Ptr)^.SignExponent and F80_MASK16_SIGN) shl 48;
@@ -1803,6 +1820,7 @@ If ((Exponent > 0) and (Exponent <= F80_MASK16_EXP)) and ((Mantissa and F80_MASK
   }
     If GetX87ExceptionMask(excInvalidOP) then
       begin
+        SetX87ExceptionFlag(excInvalidOP,True);
       {
         return negative QNaN (QNaN floating point indefinite)
 
@@ -1810,7 +1828,6 @@ If ((Exponent > 0) and (Exponent <= F80_MASK16_EXP)) and ((Mantissa and F80_MASK
         nonsensical error without it
       }
         PUInt64(Float64Ptr)^ := UInt64(F64_MASK_SIGN or F64_MASK_EXP or F64_MASK_FHB);
-        SetX87ExceptionFlag(excInvalidOP,True)
       end
     else raise EF80UInvalidOP.CreateDefMsg;
   end
@@ -1831,19 +1848,14 @@ else
                 If ((RoundMode = rmUp) and (Sign = 0)) or
                    ((RoundMode = rmDown) and (Sign <> 0)) then
                   // return signed smallest representable number
-                  PUInt64(Float64Ptr)^ := Sign or UInt64(1)
+                  ResultTemp := Sign or UInt64(1)
                 else
                   // convert to signed zero
-                  PUInt64(Float64Ptr)^ := Sign;
+                  ResultTemp := Sign;
                 // post-computation exceptions
-                If GetX87ExceptionMask(excUnderflow) then
-                  SetX87ExceptionFlag(excUnderflow,True)
-                else
-                  raise EF80UUnderflow.CreateDefMsg;
-                If GetX87ExceptionMask(excPrecision) then
-                  SetX87ExceptionFlag(excPrecision,True)
-                else
-                  raise EF80UPrecision.CreateDefMsg;
+                ExceptionSetOrRaise(excUnderflow);
+                PUInt64(Float64Ptr)^ := ResultTemp;
+                ExceptionSetOrRaise(excPrecision);
               end
             // mantissa of 0 - return signed zero
             else PUInt64(Float64Ptr)^ := Sign;
@@ -1857,19 +1869,14 @@ else
               If ((RoundMode = rmUp) and (Sign = 0)) or
                  ((RoundMode = rmDown) and (Sign <> 0)) then
                 // return signed smallest representable number
-                PUInt64(Float64Ptr)^ := Sign or UInt64(1)
+                ResultTemp := Sign or UInt64(1)
               else
                 // convert to signed zero
-                PUInt64(Float64Ptr)^ := Sign;
+                ResultTemp := Sign;
               // post-computation exceptions
-              If GetX87ExceptionMask(excUnderflow) then
-                SetX87ExceptionFlag(excUnderflow,True)
-              else
-                raise EF80UUnderflow.CreateDefMsg;
-              If GetX87ExceptionMask(excPrecision) then
-                SetX87ExceptionFlag(excPrecision,True)
-              else
-                raise EF80UPrecision.CreateDefMsg;
+              ExceptionSetOrRaise(excUnderflow);
+              PUInt64(Float64Ptr)^ := ResultTemp;
+              ExceptionSetOrRaise(excPrecision);
             end;
 
           {
@@ -1888,22 +1895,41 @@ else
               It is correct and expected behaviour, it just has to be observed
               when raising underflow exceptions.
             }
-              PUInt64(Float64Ptr)^ := Sign or ShiftMantissaDenorm(Mantissa,$3C0C - Exponent,BitsLost);
-              If BitsLost then
+              ResultTemp := Sign or ShiftMantissaDenorm(Mantissa,$3C0C - Exponent,BitsLost);
+            {
+              post-computation exceptions
+
+              Exception reporting in this case is somewhat complex...
+
+              When underflow exception is not masked, it is reported whenever
+              the result is a denormal (ie. the result is not promoted to a
+              normalized value).
+              When underflow exception is masked, the underflow is reported
+              only when the result is both denormal and inexact.
+            }
+              If GetX87ExceptionMask(excUnderflow) then
                 begin
-                  // post-computation exceptions
-                  If (PUInt64(Float64Ptr)^ and F64_MASK_EXP) = 0 then
+                  // underflow exception masked
+                  If BitsLost then
                     begin
-                      // number was NOT converted to normalized encoding
-                      If GetX87ExceptionMask(excUnderflow) then
-                        SetX87ExceptionFlag(excUnderflow,True)
-                      else
-                        raise EF80UUnderflow.CreateDefMsg;
-                    end;
-                  If GetX87ExceptionMask(excPrecision) then
-                    SetX87ExceptionFlag(excPrecision,True)
-                  else
-                    raise EF80UPrecision.CreateDefMsg;
+                      // inexact result
+                      If (ResultTemp and F64_MASK_EXP) = 0 then
+                        // result is denormal
+                        ExceptionSetOrRaise(excUnderflow);
+                      PUInt64(Float64Ptr)^ := ResultTemp;
+                      ExceptionSetOrRaise(excPrecision);
+                    end
+                  else PUInt64(Float64Ptr)^ := ResultTemp;
+                end
+              else
+                begin
+                  // underflow exception not masked
+                  If (ResultTemp and F64_MASK_EXP) = 0 then
+                    raise EF80UUnderflow.CreateDefMsg;
+                  PUInt64(Float64Ptr)^ := ResultTemp;
+                  If BitsLost then
+                    // inexact result
+                    ExceptionSetOrRaise(excPrecision);
                 end;
             end;
 
@@ -1917,19 +1943,14 @@ else
                  ((RoundMode = rmUp) and (Sign <> 0)) or
                  ((RoundMode = rmDown) and (Sign = 0)) then
                 // return signed largest representable number
-                PUInt64(Float64Ptr)^ := Sign or UInt64($7FEFFFFFFFFFFFFF)
+                ResultTemp := Sign or UInt64($7FEFFFFFFFFFFFFF)
               else
                 // convert to signed infinity
-                PUInt64(Float64Ptr)^ := Sign or F64_MASK_EXP;
+                ResultTemp := Sign or F64_MASK_EXP;
               // post-computation exceptions
-              If GetX87ExceptionMask(excOverflow) then
-                SetX87ExceptionFlag(excOverflow,True)
-              else
-                raise EF80UOverflow.CreateDefMsg;
-              If GetX87ExceptionMask(excPrecision) then
-                SetX87ExceptionFlag(excPrecision,True)
-              else
-                raise EF80UPrecision.CreateDefMsg;                
+              ExceptionSetOrRaise(excOverflow);
+              PUInt64(Float64Ptr)^ := ResultTemp;
+              ExceptionSetOrRaise(excPrecision);
             end;
 
           {
@@ -1967,25 +1988,17 @@ else
         ManOverflow := True;
       end
     else ManOverflow := False;
-    PUInt64(Float64Ptr)^ := Sign or
-                            ((UInt64(Exponent - 15360) shl 52) and F64_MASK_EXP) or
-                            (Mantissa and F64_MASK_FRAC);
+    ResultTemp := Sign or
+                  ((UInt64(Exponent - 15360) shl 52) and F64_MASK_EXP) or
+                  (Mantissa and F64_MASK_FRAC);
     // post-computation exceptions
     If ManOverflow and (Exponent > 17406) then
-      begin
-        // number was converted to infinity
-        If GetX87ExceptionMask(excOverflow) then
-          SetX87ExceptionFlag(excOverflow,True)
-        else
-          raise EF80UOverflow.CreateDefMsg;
-      end;
+      // number was converted to infinity
+      ExceptionSetOrRaise(excOverflow);
+    PUInt64(Float64Ptr)^ := ResultTemp;
     If BitsLost then
-      begin
-        If GetX87ExceptionMask(excPrecision) then
-          SetX87ExceptionFlag(excPrecision,True)
-        else
-          raise EF80UPrecision.CreateDefMsg;
-      end;
+      // inexact result
+      ExceptionSetOrRaise(excPrecision);
   end;
 end;
 {$ENDIF}
