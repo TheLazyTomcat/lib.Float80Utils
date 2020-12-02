@@ -46,7 +46,7 @@
 
   Version 1.0.2 (2020-12-01)
 
-  Last change 2020-12-01
+  Last change 2020-12-02
 
   ©2020 František Milt
 
@@ -441,6 +441,11 @@ type
 
   TX87Exceptions = set of TX87Exception;
 
+const
+  AllX87Exceptions = [excInvalidOp,excDenormal,excDivByZero,excOverflow,
+                      excUnderflow,excPrecision];
+
+//------------------------------------------------------------------------------
 {
   GetX87ExceptionMask
 
