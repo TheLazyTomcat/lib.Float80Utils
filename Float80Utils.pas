@@ -31,7 +31,7 @@
     Second is PurePascal mode. In it, a complete pascal implementation of
     conversion is used instead, so it can be called even on systems with no
     suitable FPU.
-    Auxiliray functions are operating on local software implementation of
+    Auxiliyry functions are operating on local software implementation of
     status and control word and do not access the hardware.
     This implementation partially emulates the conversion how it is done on x87,
     including exception raising (exception masking and pre- and post-calculation
@@ -46,7 +46,7 @@
 
   Version 1.0.2 (2020-12-01)
 
-  Last change 2020-12-02
+  Last change 2020-12-06
 
   ©2020 František Milt
 
@@ -112,7 +112,7 @@ interface
 
 uses
   SysUtils,
-  AuxTypes {contains declaration Float80 type};
+  AuxTypes {contains declaration of Float80 type};
 
 {===============================================================================
     Library-specific exceptions - declaration
@@ -1894,7 +1894,7 @@ else
             {
               denormalize
 
-              Note that ShiftMantissaEx can return mantissa with integer bit
+              Note that ShiftMantissaDenorm can return mantissa with integer bit
               (bit 52) set.
               This, when not masked, will result in biased exponent of 1.
               It is correct and expected behaviour, it just has to be observed
