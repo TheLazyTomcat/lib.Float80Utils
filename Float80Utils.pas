@@ -17,7 +17,7 @@
 
     Beyond the conversion routines, there are also some utilities - namely
     functions for number information or encoding/decoding the float80 type
-    from/to its substituent parts (mantissa, exponent, sign).    
+    from/to its constituent parts (mantissa, exponent, sign).    
 
     From user perspective, there is not much difference, but it must be noted
     that the unit can be compiled in two modes, each totally different.
@@ -44,7 +44,7 @@
     summary flag bit is not set both for masked and unmasked exceptions. Top of
     the stack, busy and stack fault flags are outright ignored.
 
-  Version 1.0.2 (2020-12-01)
+  Version 1.0.2 (2020-12-08)
 
   Last change 2020-12-06
 
