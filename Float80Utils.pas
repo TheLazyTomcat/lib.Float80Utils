@@ -44,9 +44,9 @@
     summary flag bit is not set both for masked and unmasked exceptions. Top of
     the stack, busy and stack fault flags are outright ignored.
 
-  Version 1.0.2 (2020-12-08)
+  Version 1.0.3 (2020-12-19)
 
-  Last change 2020-12-06
+  Last change 2020-12-19
 
   ©2020 František Milt
 
@@ -1811,6 +1811,20 @@ var
     else SetX87ExceptionFlag(Exception,True);
   end;
 
+  Function DenormReportUnderflow: Boolean;
+  begin
+    case RoundMode of
+      rmNearest:
+        Result := (Mantissa and UInt64($C00)) <> UInt64($C00);
+      rmDown:
+        Result :=  ((Mantissa and UInt64($FFF)) <= UInt64($800)) or (Sign = 0);
+      rmUp:
+        Result := ((Mantissa and UInt64($FFF)) <= UInt64($800)) or (Sign <> 0);
+    else
+      Result := True;
+    end;
+  end;
+
 begin
 RoundMode := GetX87RoundingMode;
 Sign := UInt64(PFloat80Overlay(Float80Ptr)^.SignExponent and F80_MASK16_SIGN) shl 48;
@@ -1885,32 +1899,25 @@ else
             end;
 
           {
-            exponent 15308..15360 (-1075..-1023 unbiased) - exponent still too
+            exponent 15308..15359 (-1075..-1022 unbiased) - exponent still too
             small to be represented in double, but can be denormalized to fit
             (result will have implicit exponent of -1022, explicit 0)
           }
     $3BCC..
-    $3C00:  begin
+    $3BFF:  begin
             {
               denormalize
 
-              Note that ShiftMantissaDenorm can return mantissa with integer bit
-              (bit 52) set.
-              This, when not masked, will result in biased exponent of 1.
-              It is correct and expected behaviour, it just has to be observed
-              when raising underflow exceptions.
+              Conversion followed by a gradual underflow should take place here
+              - but it is replaced by a one-time shift, which provides the same
+              results and exceptions for given exponent range and is faster.
             }
               ResultTemp := Sign or ShiftMantissaDenorm(Mantissa,$3C0C - Exponent,BitsLost);
             {
               post-computation exceptions
 
-              Exception reporting in this case is somewhat complex...
-
-              When underflow exception is not masked, it is reported whenever
-              the result is a denormal (ie. the result is not promoted to a
-              normalized value).
-              When underflow exception is masked, the underflow is reported
-              only when the result is both denormal and inexact.
+              Note that, when underflow is masked, the underflow exception flag
+              is set only when the result is also inexact.
             }
               If GetX87ExceptionMask(excUnderflow) then
                 begin
@@ -1918,9 +1925,208 @@ else
                   If BitsLost then
                     begin
                       // inexact result
-                      If (ResultTemp and F64_MASK_EXP) = 0 then
-                        // result is denormal
-                        ExceptionSetOrRaise(excUnderflow);
+                      ExceptionSetOrRaise(excUnderflow);
+                      PUInt64(Float64Ptr)^ := ResultTemp;
+                      ExceptionSetOrRaise(excPrecision);
+                    end
+                  else PUInt64(Float64Ptr)^ := ResultTemp;
+                end
+              else raise EF80UUnderflow.CreateDefMsg;
+            end;
+
+          {
+            exponent 15360 (-1023 unbiased) - similar to previous case, but
+            with much more complexities because it can yield a normalized number
+            as a result of denormalization (see further).
+          }
+    $3C00:  begin
+            {
+              denormalize
+
+              ShiftMantissaDenorm can, in this case, return mantissa with the
+              integer bit (bit 52) set.
+
+              This, when not masked, will create a result with biased exponent
+              of 1, as the integer bit is implicit in double-precision floats
+              and its place is occupied by lowest bit of the exponent. Simply
+              put - the mantissa will, thanks to rounding, overflow into
+              exponent, and a normalized value will be created.
+              
+              This is expected and, in fact, a desired behaviour, it just has
+              to be observed when raising exceptions.
+            }
+              ResultTemp := Sign or ShiftMantissaDenorm(Mantissa,12,BitsLost);
+            {
+              post-computation exceptions
+
+              Exception reporting in this case is somewhat complex...
+
+              Precision exception is simple - if the result cannot be fully
+              represented (ie. mantissa bits were lost either in coversion or
+              in gradual underflow), its flag will be set and, when not masked,
+              the exception raised.
+
+              Underflow exception, when masked, can only be set or raised when
+              the result is inexact. Whether it is masked or not, its raising/
+              setting is further complicated by the fact that sometimes, the
+              denormalization process yields a normalized value with zero
+              fraction, integer bit of 1 and biased exponent 1.
+              When result is a denormal, the underflow exception is always
+              reported.
+              When result is promoted to a normalized value...
+
+                This can only happen for exponent -1023 and mantissa with all
+                fraction bits above bit 11 set. Whether the underflow exception
+                is reported or not then depends on selected rounding mode, sign,
+                and mantissa bits 0..11:
+
+                  For rounding to nearest, the underflow is reported unless bits
+                  10 and 11 are BOTH set, then underflow is not reported.
+
+                  For rounding down, the condition changes depending on the bit
+                  11 in original mantissa.
+                  For positive numbers, undeflow is always reported.
+                  For negative numbers, when the bit is NOT set, then underflow
+                  is reported. When it is set, underflow is reported only when
+                  bits 0..10 are all zero.
+
+                  For rounding up, the condition again changes depending on bit
+                  11 in original mantissa.
+                  For positive numbers, when the bit is NOT set, then underflow
+                  is reported. When it is set, underflow is reported only when
+                  bits 0..10 are all zero.
+                  For negative numbers, underflow is always reported.
+
+                  For rounding to zero (truncate), the underflow is always
+                  reported.
+
+                These complexities stem from the process of conversion, where
+                the double-extended (64bit, explicit integer bit) mantissa is
+                first converted to a double-precision (53bit, implicit
+                integer bit) and then, if necessary, a gradual underflow is
+                applied to bring exponent to allowed range.
+
+                And since the gradual underflow is not performed here, we have
+                to do some post-computation checks to see whether to report
+                underflow exception or not. This is done by probing the
+                mentioned bits.
+
+                Let's do some examples (RM = rounding mode, S = sign,
+                M = mantissa, E = exponent, U = underflow exception raported,
+                P = precision exception reported):
+
+                  #1  RM = nearest, S = +
+
+                        M 1.111 1111 .. 1111 1011 1111 1111   E -1023
+
+                      conversion...
+
+                        M 1.111 1111 .. 1111 1                E -1023   U P
+
+                      gradual underflow...
+
+                        M 1.000 0000 .. 0000 0                E -1022   U P
+
+
+                      final reported exceptions: U P
+
+                  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
+
+                  #2  RM = nearest, S = +
+
+                        M 1.111 1111 .. 1111 1100 0000 0000   E -1023
+
+                      conversion...
+
+                       M 10.000 0000 .. 0000 0                E -1023    P
+                        M 1.000 0000 .. 0000 0                E -1022    P
+
+                      gradual underflow...
+
+                        not needed
+
+                      final reported exceptions: P
+
+                  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --    
+
+                  #3  RM = nearest, S = +
+
+                        M 1.111 1111 .. 1111 1100 0000 0001   E -1023
+
+                      conversion...
+
+                       M 10.000 0000 .. 0000 0                E -1023    P
+                        M 1.000 0000 .. 0000 0                E -1022    P
+
+                      gradual underflow...
+
+                        not needed
+
+                      final reported exceptions: P
+
+                  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --    
+
+                  #4  RM = up, S = +
+
+                        M 1.111 1111 .. 1111 0111 1111 1111   E -1023
+
+                      conversion...
+
+                        M 1.111 1111 .. 1111 1                E -1023  U P
+
+                      gradual underflow...
+
+                        M 1.000 0000 .. 0000 0                E -1022  U P
+
+                      final reported exceptions: U P
+
+                  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --    
+
+                  #5  RM = up, S = +
+
+                        M 1.111 1111 .. 1111 1000 0000 0000   E -1023
+
+                      conversion...
+
+                        M 1.111 1111 .. 1111 1                E -1023  U
+
+                      gradual underflow...
+
+                        M 1.000 0000 .. 0000 0                E -1022  U P
+
+                      final reported exceptions: U P
+
+                  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --    
+
+                  #6  RM = up, S = +
+
+                        M 1.111 1111 .. 1111 1000 0000 0001   E -1023
+
+                      conversion...
+
+                       M 10.000 0000 .. 0000 0                E -1023    P
+                        M 1.000 0000 .. 0000 0                E -1022    P
+
+                      gradual underflow...
+
+                        not needed
+
+                      final reported exceptions: P
+            }
+              If GetX87ExceptionMask(excUnderflow) then
+                begin
+                  // underflow exception masked
+                  If BitsLost then
+                    begin
+                      // inexact result
+                      If (ResultTemp and F64_MASK_EXP) <> 0 then
+                        begin
+                          // result promoted to a normalized value
+                          If DenormReportUnderflow then
+                            ExceptionSetOrRaise(excUnderflow);
+                        end
+                      // result is a denormal
+                      else ExceptionSetOrRaise(excUnderflow);
                       PUInt64(Float64Ptr)^ := ResultTemp;
                       ExceptionSetOrRaise(excPrecision);
                     end
@@ -1929,8 +2135,14 @@ else
               else
                 begin
                   // underflow exception not masked
-                  If (ResultTemp and F64_MASK_EXP) = 0 then
-                    raise EF80UUnderflow.CreateDefMsg;
+                  If (ResultTemp and F64_MASK_EXP) <> 0 then
+                    begin
+                      // result promoted to a normalized value
+                      If DenormReportUnderflow then
+                        raise EF80UUnderflow.CreateDefMsg;
+                    end
+                  // result is a denormal
+                  else raise EF80UUnderflow.CreateDefMsg;
                   PUInt64(Float64Ptr)^ := ResultTemp;
                   If BitsLost then
                     // inexact result
