@@ -44,9 +44,9 @@
     summary flag bit is not set both for masked and unmasked exceptions. Top of
     the stack, busy and stack fault flags are outright ignored.
 
-  Version 1.0.3 (2020-12-19)
+  Version 1.0.4 (2020-12-25)
 
-  Last change 2020-12-19
+  Last change 2020-12-25
 
   ©2020 František Milt
 
@@ -649,28 +649,27 @@ Function Abs(const Value: Float80): Float80;
 Function Neg(const Value: Float80): Float80;
 
 {-------------------------------------------------------------------------------
-    Utility routines - float parts
+    Utility routines - floats encoding/decoding
 -------------------------------------------------------------------------------}
-{
-  DecodeFloat80
 
-  When BiasedExp is set to true, the returned exponent is exponent as is
-  stored in the value, that is, biased. When false, the returned exponent is
-  unbiased (its true value).
+Function MapToFloat80(High16: UInt16; Low64: UInt64): Float80;
+Function MapToExtended(High16: UInt16; Low64: UInt64): Float80;{$IFDEF CanInline} inline;{$ENDIF}
 
-  When IntBit is set to true, the returned mantissa contains the integer bit
-  (bit 63) as it is stored in the number. When false, the integer bit is
-  masked-out and is zero, irrespective of its actual value.
-}
-procedure DecodeFloat80(const Value: Float80; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
-procedure DecodeExtended(const Value: Float80; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
+procedure MapFromFloat80(const Value: Float80; out High16: UInt16; out Low64: UInt64);
+procedure MapFromExtended(const Value: Float80; out High16: UInt16; out Low64: UInt64);{$IFDEF CanInline} inline;{$ENDIF}
 
+//------------------------------------------------------------------------------
 {
   EncodeFloat80
+  EncodeExtended
 
   When BiasedExp is true, it indicates that the passed exponent is already
   biased and will be stored as is. When false, the passed exponent will be
   biased before storing.
+
+    NOTE - the valid range for exponent is -16383..+16384 when biased, 0..32767
+           when unbiased. The exponent is clamped (limited to a prescribed
+           range) before biasing and storing.
 
   When IntBit is true, it indicates that the passed mantissa contains the
   integer bit (bit 63) and will be stored as is. When false, the integer bit
@@ -679,6 +678,80 @@ procedure DecodeExtended(const Value: Float80; out Mantissa: UInt64; out Exponen
 }
 Function EncodeFloat80(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80;
 Function EncodeExtended(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80;{$IFDEF CanInline} inline;{$ENDIF}
+
+{
+  DecodeFloat80
+  DecodeExtended
+
+  When BiasedExp is set to true, the returned exponent is exponent as is
+  stored in the value, that is, biased. When false, the returned exponent is
+  unbiased (its true value).
+
+    NOTE - returned exponent will be within range of -16383..+16384 when
+           biased, 0..32767 when unbiased.
+
+  When IntBit is set to true, the returned mantissa contains the integer bit
+  (bit 63) as it is stored in the number. When false, the integer bit is
+  masked-out and is zero, irrespective of its actual value.
+}
+procedure DecodeFloat80(const Value: Float80; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+procedure DecodeExtended(const Value: Float80; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
+
+//------------------------------------------------------------------------------
+{
+  Since conversions in this library are vorking with double-precision (64bit)
+  floats, one might want to decode/encode these floats too. Threfore...
+}
+
+Function MapToFloat64(Value: UInt64): Float64;
+Function MapToDouble(Value: UInt64): Float64;{$IFDEF CanInline} inline;{$ENDIF}
+
+Function MapFromFloat64(const Value: Float64): UInt64;
+Function MapFromDouble(const Value: Float64): UInt64;{$IFDEF CanInline} inline;{$ENDIF}
+
+//------------------------------------------------------------------------------
+{
+  EncodeFloat64
+  EncodeDouble
+
+  When BiasedExp is true, it indicates that the passed exponent is already
+  biased and will be stored as is. When false, the passed exponent will be
+  biased before storing.
+
+    NOTE - the valid range for exponent is -1023..+1024 when biased, 0..2047
+           when unbiased. The exponent is clamped (limited to a prescribed
+           range) before biasing and storing.
+
+  Integer bit, when passed in the mantissa, is ignored - it is implied for
+  double-precision float.
+
+    NOTE - only lowest 52 bits of the mantissa are used, other bits gets
+           masked-out before storage.
+}
+Function EncodeFloat64(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False): Float64;
+Function EncodeDouble(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False): Float64;{$IFDEF CanInline} inline;{$ENDIF}
+
+{
+  DecodeFloat64
+  DecodeDouble
+
+  When BiasedExp is set to true, the returned exponent is exponent as is
+  stored in the value, that is, biased. When false, the returned exponent is
+  unbiased (its true value).
+
+    NOTE - returned exponent will be within range of -1023..+1024 when biased,
+           0..2047 when unbiased.
+
+  When IntBit is set to true, the returned mantissa contains the integer bit
+  (bit 52) inferred from the number class (0 for denormals and zero,
+  1 otherwise). When false, the integer bit is masked-out and is zero,
+  irrespective of actual value.
+
+    NOTE - only lowest 53 bits of the mantissa are valid, other bits will
+           always be zero.
+}
+procedure DecodeFloat64(const Value: Float64; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+procedure DecodeDouble(const Value: Float64; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
 
 implementation
 
@@ -691,16 +764,16 @@ implementation
     Internal constants and types
 ===============================================================================}
 const
-{$IFDEF PurePascal}
   F64_MASK_SIGN = UInt64($8000000000000000);  // sign bit
+{$IFNDEF FPC}
+  F64_MASK_NSGN = UInt64($7FFFFFFFFFFFFFFF);  // non-sign bits
+{$ENDIF}
   F64_MASK_EXP  = UInt64($7FF0000000000000);  // exponent
   F64_MASK_FRAC = UInt64($000FFFFFFFFFFFFF);  // fraction/mantissa
+{$IFDEF PurePascal}
   F64_MASK_FHB  = UInt64($0008000000000000);  // highest bit of the mantissa
 {$ENDIF}
-{$IFNDEF FPC} // to remove hints that cannot be suppressed... :/
-  F64_MASK_NSGN = UInt64($7FFFFFFFFFFFFFFF);  // non-sign bits
   F64_MASK_INTB = UInt64($0010000000000000);  // integer bit of the mantissa
-{$ENDIF}
 
   F80_MASK16_SIGN = UInt16($8000);
   F80_MASK16_NSGN = UInt16($7FFF);
@@ -1899,7 +1972,7 @@ else
             end;
 
           {
-            exponent 15308..15359 (-1075..-1022 unbiased) - exponent still too
+            exponent 15308..15359 (-1075..-1024 unbiased) - exponent still too
             small to be represented in double, but can be denormalized to fit
             (result will have implicit exponent of -1022, explicit 0)
           }
@@ -2437,6 +2510,89 @@ end;
     Utility routines - value encoding and decoding
 -------------------------------------------------------------------------------}
 
+Function MapToFloat80(High16: UInt16; Low64: UInt64): Float80;
+var
+  _Result:  TFloat80Overlay absolute Result;
+begin
+_Result.Part_16 := High16;
+_Result.Part_64 := Low64;
+end;
+
+//------------------------------------------------------------------------------
+
+Function MapToExtended(High16: UInt16; Low64: UInt64): Float80;
+begin
+Result := MapToFloat80(High16,Low64);
+end;
+
+//------------------------------------------------------------------------------
+
+procedure MapFromFloat80(const Value: Float80; out High16: UInt16; out Low64: UInt64);
+var
+  _Value: TFloat80Overlay absolute Value;
+begin
+High16 := _Value.Part_16;
+Low64 := _Value.Part_64;
+end;
+
+//------------------------------------------------------------------------------
+
+procedure MapFromExtended(const Value: Float80; out High16: UInt16; out Low64: UInt64);
+begin
+MapFromExtended(Value,High16,Low64);
+end;
+
+//==============================================================================
+
+// auxiliary routine
+Function ClampExp(ExpVal: Int16; Low,High: Int16): Int16;
+begin
+If ExpVal < Low then
+  Result := Low
+else If ExpVal > High then
+  Result := High
+else
+  Result := ExpVal;
+end;
+
+//------------------------------------------------------------------------------
+
+Function EncodeFloat80(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80;
+var
+  SignExponent: UInt16;
+  _Result:      TFloat80Overlay absolute Result;
+begin
+If Sign then
+  SignExponent := $8000
+else
+  SignExponent := $0000;
+If BiasedExp then
+  _Result.SignExponent := SignExponent or (UInt16(ClampExp(Exponent,0,32767)) and F80_MASK16_EXP)
+else
+  _Result.SignExponent := SignExponent or (UInt16(ClampExp(Exponent,-16383,16384) + FLOAT80_EXPONENTBIAS) and F80_MASK16_EXP);
+If IntBit then
+  _Result.Mantissa := Mantissa
+else
+  begin
+    // imply integer bit from exponent...
+    If (_Result.SignExponent and F80_MASK16_EXP) = 0 then
+      // zero exponent (zero or denormal) - integer bit 0
+      _Result.Mantissa := Mantissa and not F80_MASK64_INTB
+    else
+      // non-zero exponent - integer bit 1
+      _Result.Mantissa := Mantissa or F80_MASK64_INTB;
+  end;
+end;
+
+//------------------------------------------------------------------------------
+
+Function EncodeExtended(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80;
+begin
+Result := EncodeFloat80(Mantissa,Exponent,Sign,BiasedExp,IntBit);
+end;
+
+//------------------------------------------------------------------------------
+
 procedure DecodeFloat80(const Value: Float80; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
 var
   _Value: TFloat80Overlay absolute Value;
@@ -2459,40 +2615,88 @@ begin
 DecodeFloat80(Value,Mantissa,Exponent,Sign,BiasedExp,IntBit);
 end;
 
-//------------------------------------------------------------------------------
+//==============================================================================
 
-Function EncodeFloat80(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80;
+Function MapToFloat64(Value: UInt64): Float64;
 var
-  SignExponent: UInt16;
-  _Result:      TFloat80Overlay absolute Result;
+  _Value: Float64 absolute Value;
 begin
-If Sign then
-  SignExponent := $8000
-else
-  SignExponent := $0000;
-If BiasedExp then
-  _Result.SignExponent := SignExponent or (UInt16(Exponent) and F80_MASK16_EXP)
-else
-  _Result.SignExponent := SignExponent or (UInt16(Exponent + FLOAT80_EXPONENTBIAS) and F80_MASK16_EXP);
-If IntBit then
-  _Result.Mantissa := Mantissa
-else
-  begin
-    // imply integer bit from exponent...
-    If (_Result.SignExponent and F80_MASK16_EXP) = 0 then
-      // zero exponent (zero or denormal) - integer bit 0
-      _Result.Mantissa := Mantissa and not F80_MASK64_INTB
-    else
-      // non-zero exponent - integer bit 1
-      _Result.Mantissa := Mantissa or F80_MASK64_INTB;
-  end;
+Result := _Value;
 end;
 
 //------------------------------------------------------------------------------
 
-Function EncodeExtended(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80;
+Function MapToDouble(Value: UInt64): Float64;
 begin
-Result := EncodeFloat80(Mantissa,Exponent,Sign,BiasedExp,IntBit);
+Result := MapToFloat64(Value);
+end;
+
+//------------------------------------------------------------------------------
+
+Function MapFromFloat64(const Value: Float64): UInt64;
+var
+  _Value: UInt64 absolute Value;
+begin
+Result := _Value;
+end;
+
+//------------------------------------------------------------------------------
+
+Function MapFromDouble(const Value: Float64): UInt64;
+begin
+Result := MapFromFloat64(Value);
+end;
+
+//==============================================================================
+
+Function EncodeFloat64(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False): Float64;
+var
+  _Result:  UInt64 absolute Result;
+begin
+_Result := Mantissa and UInt64($000FFFFFFFFFFFFF);
+If BiasedExp then
+  _Result := _Result or ((UInt64(ClampExp(Exponent,0,2047)) shl 52) and F64_MASK_EXP)
+else
+  _Result := _Result or ((UInt64(ClampExp(Exponent,-1023,1024) + FLOAT64_EXPONENTBIAS) shl 52) and F64_MASK_EXP);
+If Sign then
+  _Result := _Result or UInt64($8000000000000000)
+else
+  _Result := _Result or UInt64($0000000000000000);
+end;
+
+//------------------------------------------------------------------------------
+
+Function EncodeDouble(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False): Float64;
+begin
+Result := EncodeFloat64(Mantissa,Exponent,Sign,BiasedExp);
+end;
+
+//------------------------------------------------------------------------------
+
+procedure DecodeFloat64(const Value: Float64; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+var
+  _Value: UInt64 absolute Value;
+begin
+If IntBit then
+  begin
+    If ((_Value and F64_MASK_EXP) = 0){zero or denormal} then
+      Mantissa := _Value and F64_MASK_FRAC
+    else
+      Mantissa := (_Value and F64_MASK_FRAC) or F64_MASK_INTB;
+  end
+else Mantissa := _Value and F64_MASK_FRAC;
+If BiasedExp then
+  Exponent := Int16((_Value and F64_MASK_EXP) shr 52)
+else
+  Exponent := Int16((_Value and F64_MASK_EXP) shr 52) - FLOAT64_EXPONENTBIAS;
+Sign := (_Value and F64_MASK_SIGN) <> 0;
+end;
+
+//------------------------------------------------------------------------------
+
+procedure DecodeDouble(const Value: Float64; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+begin
+DecodeFloat64(Value,Mantissa,Exponent,Sign,BiasedExp,IntBit);
 end;
 
 end.
