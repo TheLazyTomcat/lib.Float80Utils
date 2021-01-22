@@ -44,11 +44,11 @@
     summary flag bit is not set both for masked and unmasked exceptions. Top of
     the stack, busy and stack fault flags are outright ignored.
 
-  Version 1.0.4 (2020-12-25)
+  Version 1.0.5 (2021-01-22)
 
-  Last change 2020-12-25
+  Last change 2021-01-22
 
-  ©2020 František Milt
+  ©2020-2021 František Milt
 
   Contacts:
     František Milt: frantisek.milt@gmail.com
@@ -660,6 +660,7 @@ procedure MapFromExtended(const Value: Float80; out High16: UInt16; out Low64: U
 
 //------------------------------------------------------------------------------
 {
+  EncodeFloat80Buffer
   EncodeFloat80
   EncodeExtended
 
@@ -676,10 +677,12 @@ procedure MapFromExtended(const Value: Float80; out High16: UInt16; out Low64: U
   in passed mantissa is ignored and its value for storage is implied from the
   exponent.
 }
-Function EncodeFloat80(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80;
+procedure EncodeFloat80Buffer(out Buffer; Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+Function EncodeFloat80(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80; {$IFDEF CanInline} inline;{$ENDIF}
 Function EncodeExtended(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80;{$IFDEF CanInline} inline;{$ENDIF}
 
 {
+  DecodeFloat80Buffer
   DecodeFloat80
   DecodeExtended
 
@@ -694,7 +697,8 @@ Function EncodeExtended(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; Biased
   (bit 63) as it is stored in the number. When false, the integer bit is
   masked-out and is zero, irrespective of its actual value.
 }
-procedure DecodeFloat80(const Value: Float80; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+procedure DecodeFloat80Buffer(const Buffer; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+procedure DecodeFloat80(const Value: Float80; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
 procedure DecodeExtended(const Value: Float80; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
 
 //------------------------------------------------------------------------------
@@ -711,6 +715,7 @@ Function MapFromDouble(const Value: Float64): UInt64;{$IFDEF CanInline} inline;{
 
 //------------------------------------------------------------------------------
 {
+  EncodeFloat64Buffer
   EncodeFloat64
   EncodeDouble
 
@@ -728,10 +733,12 @@ Function MapFromDouble(const Value: Float64): UInt64;{$IFDEF CanInline} inline;{
     NOTE - only lowest 52 bits of the mantissa are used, other bits gets
            masked-out before storage.
 }
-Function EncodeFloat64(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False): Float64;
+procedure EncodeFloat64Buffer(out Buffer; Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False);
+Function EncodeFloat64(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False): Float64;{$IFDEF CanInline} inline;{$ENDIF}
 Function EncodeDouble(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False): Float64;{$IFDEF CanInline} inline;{$ENDIF}
 
 {
+  DecodeFloat64Buffer
   DecodeFloat64
   DecodeDouble
 
@@ -750,7 +757,8 @@ Function EncodeDouble(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedEx
     NOTE - only lowest 53 bits of the mantissa are valid, other bits will
            always be zero.
 }
-procedure DecodeFloat64(const Value: Float64; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+procedure DecodeFloat64Buffer(const Buffer; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+procedure DecodeFloat64(const Value: Float64; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
 procedure DecodeDouble(const Value: Float64; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
 
 implementation
@@ -2557,10 +2565,10 @@ end;
 
 //------------------------------------------------------------------------------
 
-Function EncodeFloat80(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80;
+procedure EncodeFloat80Buffer(out Buffer; Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
 var
   SignExponent: UInt16;
-  _Result:      TFloat80Overlay absolute Result;
+  _Result:      TFloat80Overlay absolute Buffer;
 begin
 If Sign then
   SignExponent := $8000
@@ -2586,6 +2594,13 @@ end;
 
 //------------------------------------------------------------------------------
 
+Function EncodeFloat80(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80;
+begin
+EncodeFloat80Buffer(Result,Mantissa,Exponent,Sign,BiasedExp,IntBit);
+end;
+
+//------------------------------------------------------------------------------
+
 Function EncodeExtended(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80;
 begin
 Result := EncodeFloat80(Mantissa,Exponent,Sign,BiasedExp,IntBit);
@@ -2593,9 +2608,9 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure DecodeFloat80(const Value: Float80; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+procedure DecodeFloat80Buffer(const Buffer; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
 var
-  _Value: TFloat80Overlay absolute Value;
+  _Value: TFloat80Overlay absolute Buffer;
 begin
 If IntBit then
   Mantissa := _Value.Mantissa
@@ -2606,6 +2621,13 @@ If BiasedExp then
 else
   Exponent := Int16(_Value.SignExponent and F80_MASK16_EXP) - FLOAT80_EXPONENTBIAS;
 Sign := (_Value.SignExponent and F80_MASK16_SIGN) <> 0;
+end;
+
+//------------------------------------------------------------------------------
+
+procedure DecodeFloat80(const Value: Float80; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+begin
+DecodeFloat80Buffer(Value,Mantissa,Exponent,Sign,BiasedExp,IntBit);
 end;
 
 //------------------------------------------------------------------------------
@@ -2649,9 +2671,9 @@ end;
 
 //==============================================================================
 
-Function EncodeFloat64(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False): Float64;
+procedure EncodeFloat64Buffer(out Buffer; Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False);
 var
-  _Result:  UInt64 absolute Result;
+  _Result:  UInt64 absolute Buffer;
 begin
 _Result := Mantissa and UInt64($000FFFFFFFFFFFFF);
 If BiasedExp then
@@ -2666,6 +2688,13 @@ end;
 
 //------------------------------------------------------------------------------
 
+Function EncodeFloat64(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False): Float64;
+begin
+EncodeFloat64Buffer(Result,Mantissa,Exponent,Sign,BiasedExp);
+end;
+
+//------------------------------------------------------------------------------
+
 Function EncodeDouble(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False): Float64;
 begin
 Result := EncodeFloat64(Mantissa,Exponent,Sign,BiasedExp);
@@ -2673,9 +2702,9 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure DecodeFloat64(const Value: Float64; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+procedure DecodeFloat64Buffer(const Buffer; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
 var
-  _Value: UInt64 absolute Value;
+  _Value: UInt64 absolute Buffer;
 begin
 If IntBit then
   begin
@@ -2690,6 +2719,13 @@ If BiasedExp then
 else
   Exponent := Int16((_Value and F64_MASK_EXP) shr 52) - FLOAT64_EXPONENTBIAS;
 Sign := (_Value and F64_MASK_SIGN) <> 0;
+end;
+
+//------------------------------------------------------------------------------
+
+procedure DecodeFloat64(const Value: Float64; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+begin
+DecodeFloat64Buffer(Value,Mantissa,Exponent,Sign,BiasedExp,IntBit);
 end;
 
 //------------------------------------------------------------------------------
