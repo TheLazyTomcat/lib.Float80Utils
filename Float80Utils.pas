@@ -46,7 +46,7 @@
 
   Version 1.0.5 (2021-01-22)
 
-  Last change 2021-01-22
+  Last change 2021-01-24
 
   ©2020-2021 František Milt
 
@@ -2603,7 +2603,7 @@ end;
 
 Function EncodeExtended(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80;
 begin
-Result := EncodeFloat80(Mantissa,Exponent,Sign,BiasedExp,IntBit);
+EncodeFloat80Buffer(Result,Mantissa,Exponent,Sign,BiasedExp,IntBit);
 end;
 
 //------------------------------------------------------------------------------
@@ -2634,7 +2634,7 @@ end;
 
 procedure DecodeExtended(const Value: Float80; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
 begin
-DecodeFloat80(Value,Mantissa,Exponent,Sign,BiasedExp,IntBit);
+DecodeFloat80Buffer(Value,Mantissa,Exponent,Sign,BiasedExp,IntBit);
 end;
 
 //==============================================================================
@@ -2697,7 +2697,7 @@ end;
 
 Function EncodeDouble(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False): Float64;
 begin
-Result := EncodeFloat64(Mantissa,Exponent,Sign,BiasedExp);
+EncodeFloat64Buffer(Result,Mantissa,Exponent,Sign,BiasedExp);
 end;
 
 //------------------------------------------------------------------------------
@@ -2732,7 +2732,7 @@ end;
 
 procedure DecodeDouble(const Value: Float64; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
 begin
-DecodeFloat64(Value,Mantissa,Exponent,Sign,BiasedExp,IntBit);
+DecodeFloat64Buffer(Value,Mantissa,Exponent,Sign,BiasedExp,IntBit);
 end;
 
 end.
