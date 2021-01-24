@@ -2567,17 +2567,16 @@ end;
 
 procedure EncodeFloat80Buffer(out Buffer; Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
 var
-  SignExponent: UInt16;
-  _Result:      TFloat80Overlay absolute Buffer;
+  _Result:  TFloat80Overlay absolute Buffer;
 begin
 If Sign then
-  SignExponent := $8000
+  _Result.SignExponent := F80_MASK16_SIGN
 else
-  SignExponent := $0000;
+  _Result.SignExponent := 0;
 If BiasedExp then
-  _Result.SignExponent := SignExponent or (UInt16(ClampExp(Exponent,0,32767)) and F80_MASK16_EXP)
+  _Result.SignExponent := _Result.SignExponent or (UInt16(ClampExp(Exponent,0,32767)) and F80_MASK16_EXP)
 else
-  _Result.SignExponent := SignExponent or (UInt16(ClampExp(Exponent,-16383,16384) + FLOAT80_EXPONENTBIAS) and F80_MASK16_EXP);
+  _Result.SignExponent := _Result.SignExponent or (UInt16(ClampExp(Exponent,-16383,16384) + FLOAT80_EXPONENTBIAS) and F80_MASK16_EXP);
 If IntBit then
   _Result.Mantissa := Mantissa
 else
@@ -2675,15 +2674,13 @@ procedure EncodeFloat64Buffer(out Buffer; Mantissa: UInt64; Exponent: Int16; Sig
 var
   _Result:  UInt64 absolute Buffer;
 begin
-_Result := Mantissa and UInt64($000FFFFFFFFFFFFF);
+_Result := Mantissa and F64_MASK_FRAC;
 If BiasedExp then
   _Result := _Result or ((UInt64(ClampExp(Exponent,0,2047)) shl 52) and F64_MASK_EXP)
 else
   _Result := _Result or ((UInt64(ClampExp(Exponent,-1023,1024) + FLOAT64_EXPONENTBIAS) shl 52) and F64_MASK_EXP);
 If Sign then
-  _Result := _Result or UInt64($8000000000000000)
-else
-  _Result := _Result or UInt64($0000000000000000);
+  _Result := _Result or F64_MASK_SIGN;
 end;
 
 //------------------------------------------------------------------------------
