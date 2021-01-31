@@ -22,27 +22,27 @@
     From user perspective, there is not much difference, but it must be noted
     that the unit can be compiled in two modes, each totally different.
 
-    First, default mode, is using assembly to directly access x87 FPU and does
-    the conversion there.
-    In this mode, auxiliry functions provided here (access to status and control
-    word, exceptions masking and so on) operates directly on real x87 registers
-    and exceptions raising is also managed by the x87 FPU.
+      First, default mode, is using assembly to directly access x87 FPU and does
+      the conversion there.
+      In this mode, auxiliry functions provided here (access to status and
+      control word, exceptions masking and so on) operates directly on real x87
+      registers and exceptions raising is also managed by the x87 FPU.
 
-    Second is PurePascal mode. In it, a complete pascal implementation of
-    conversion is used instead, so it can be called even on systems with no
-    suitable FPU.
-    Auxiliyry functions are operating on local software implementation of
-    status and control word and do not access the hardware.
-    This implementation partially emulates the conversion how it is done on x87,
-    including exception raising (exception masking and pre- and post-calculation
-    nature of exceptions are honored) and changes given by selected rounding
-    mode (note that precision mode does not affect conversions even on real x87
-    FPU).
-    But remember it is only an emulation, not simulation - there are
-    differences, notably condition codes are not affected by exceptions, and
-    when raising an unmasked exception, the exception status bits are not set,
-    summary flag bit is not set both for masked and unmasked exceptions. Top of
-    the stack, busy and stack fault flags are outright ignored.
+      Second is PurePascal mode. In it, a complete pascal implementation of
+      conversion is used instead, so it can be called even on systems with no
+      suitable FPU.
+      Auxiliary functions are operating on local software implementation of
+      status and control word and do not access the hardware.
+      This implementation partially emulates the conversion how it is done on
+      x87, including exception raising (exception masking and pre- and
+      post-calculation nature of exceptions are honored) and changes given by
+      selected rounding mode (note that precision mode does not affect
+      conversions even on real x87 FPU).
+      But remember it is only an emulation, not simulation - there are
+      differences, notably condition codes are not affected by exceptions, and
+      when raising an unmasked exception, the exception status bits are not set,
+      summary flag bit is not set both for masked and unmasked exceptions.
+      Top of the stack, busy and stack fault flags are outright ignored.
 
   Version 1.0.5 (2021-01-22)
 
@@ -128,10 +128,25 @@ type
 -------------------------------------------------------------------------------}
 type
   EF80UFPUException = class(EF80UException)
+  private
+    fControlWord: UInt16;
+    fStatusWord:  UInt16;
   protected
     Function DefaultMessage: String; virtual; abstract;
   public
+    constructor CreateNoClear(const Msg: String{$IFNDEF FPC}; Dummy: Integer = 0{$ENDIF});
+    constructor Create(const Msg: String);
+    constructor CreateDefMsgNoClear({$IFNDEF FPC}Dummy: Integer = 0{$ENDIF});
     constructor CreateDefMsg;
+  {
+    ControlWord and StatusWord properties hold content of control word and
+    status word registers respectively as they were when this exception was
+    created - they can be used for example to probe masked signaled exceptions.
+  }
+    // StatusWord holds content of status word as it was when this exception
+    // was created - can be used to probe masked signaled exceptions
+    property ControlWord: UInt16 read fControlWord;
+    property StatusWord: UInt16 read fStatusWord;
   end;
 
   // FPU stack errors
@@ -189,7 +204,7 @@ type
 -------------------------------------------------------------------------------}
 {
   Note that x87 status register is read only - it can only be changed by
-  clearing.
+  clearing exceptions.
 }
 
 const
@@ -548,8 +563,16 @@ procedure ClearX87Exceptions;{$IFNDEF PurePascal} register; assembler;{$ENDIF}
   Raises first encountered exception according to flags set in the passed
   status word.
 
+  Parameter Mask controls whether to honor exception masking (true) or not
+  (false) when raising an exception (when honored, the masked exceptions are
+  NOT raised, when not honored, all exceptions can be raised, even those
+  masked).
+  Mask bits are taken from the parameter ConrolWord, not from the actual
+  register.
+
   The exception flag bits are traversed one by one and, when a set bit is
-  encountered, it is cleared and a corresponding exception is raised.
+  encountered, it is cleared and a corresponding exception is raised (if
+  allowed by masking - see parameter Mask).
   Only one exception is raised in each call, even when multiple bits are set.
   The order in which the bits are traversed and therefore the order of
   exceptions raising is:
@@ -561,7 +584,17 @@ procedure ClearX87Exceptions;{$IFNDEF PurePascal} register; assembler;{$ENDIF}
     Overflow
     Precision
 }
-procedure RaiseX87Exceptions(var StatusWord: UInt16);
+procedure RaiseX87Exceptions(var StatusWord: UInt16; Mask: Boolean = True; ConrolWord: UInt16 = 0); overload;
+
+{
+  RaiseX87Exceptions
+
+  Calls the first overload with an input being current value of status word
+  (be it a real register or emulation).
+
+  Note that this function will NOT change the status word.
+}
+procedure RaiseX87Exceptions(Mask: Boolean = True); overload;
 
 {===============================================================================
 --------------------------------------------------------------------------------
@@ -652,11 +685,13 @@ Function Neg(const Value: Float80): Float80;
     Utility routines - floats encoding/decoding
 -------------------------------------------------------------------------------}
 
-Function MapToFloat80(High16: UInt16; Low64: UInt64): Float80;
-Function MapToExtended(High16: UInt16; Low64: UInt64): Float80;{$IFDEF CanInline} inline;{$ENDIF}
+procedure MapToFloat80Buffer(out Buffer; High16: UInt16; Low64: UInt64);
+Function MapToFloat80(High16: UInt16; Low64: UInt64): Float80;{$IFDEF CanInline} inline;{$ENDIF}
+Function MapToExtended(High16: UInt16; Low64: UInt64): Extended;
 
-procedure MapFromFloat80(const Value: Float80; out High16: UInt16; out Low64: UInt64);
-procedure MapFromExtended(const Value: Float80; out High16: UInt16; out Low64: UInt64);{$IFDEF CanInline} inline;{$ENDIF}
+procedure MapFromFloat80Buffer(const Buffer; out High16: UInt16; out Low64: UInt64);
+procedure MapFromFloat80(const Value: Float80; out High16: UInt16; out Low64: UInt64);{$IFDEF CanInline} inline;{$ENDIF}
+procedure MapFromExtended(const Value: Extended; out High16: UInt16; out Low64: UInt64);
 
 //------------------------------------------------------------------------------
 {
@@ -679,7 +714,7 @@ procedure MapFromExtended(const Value: Float80; out High16: UInt16; out Low64: U
 }
 procedure EncodeFloat80Buffer(out Buffer; Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
 Function EncodeFloat80(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80; {$IFDEF CanInline} inline;{$ENDIF}
-Function EncodeExtended(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80;{$IFDEF CanInline} inline;{$ENDIF}
+Function EncodeExtended(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Extended;{$IFDEF CanInline} inline;{$ENDIF}
 
 {
   DecodeFloat80Buffer
@@ -699,7 +734,7 @@ Function EncodeExtended(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; Biased
 }
 procedure DecodeFloat80Buffer(const Buffer; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
 procedure DecodeFloat80(const Value: Float80; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
-procedure DecodeExtended(const Value: Float80; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
+procedure DecodeExtended(const Value: Extended; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
 
 //------------------------------------------------------------------------------
 {
@@ -707,11 +742,13 @@ procedure DecodeExtended(const Value: Float80; out Mantissa: UInt64; out Exponen
   floats, one might want to decode/encode these floats too. Threfore...
 }
 
-Function MapToFloat64(Value: UInt64): Float64;
-Function MapToDouble(Value: UInt64): Float64;{$IFDEF CanInline} inline;{$ENDIF}
+procedure MapToFloat64Buffer(out Buffer; Value: UInt64);
+Function MapToFloat64(Value: UInt64): Float64;{$IFDEF CanInline} inline;{$ENDIF}
+Function MapToDouble(Value: UInt64): Double;{$IFDEF CanInline} inline;{$ENDIF}
 
-Function MapFromFloat64(const Value: Float64): UInt64;
-Function MapFromDouble(const Value: Float64): UInt64;{$IFDEF CanInline} inline;{$ENDIF}
+Function MapFromFloat64Buffer(const Buffer): UInt64;
+Function MapFromFloat64(const Value: Float64): UInt64;{$IFDEF CanInline} inline;{$ENDIF}
+Function MapFromDouble(const Value: Double): UInt64;{$IFDEF CanInline} inline;{$ENDIF}
 
 //------------------------------------------------------------------------------
 {
@@ -735,7 +772,7 @@ Function MapFromDouble(const Value: Float64): UInt64;{$IFDEF CanInline} inline;{
 }
 procedure EncodeFloat64Buffer(out Buffer; Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False);
 Function EncodeFloat64(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False): Float64;{$IFDEF CanInline} inline;{$ENDIF}
-Function EncodeDouble(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False): Float64;{$IFDEF CanInline} inline;{$ENDIF}
+Function EncodeDouble(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False): Double;{$IFDEF CanInline} inline;{$ENDIF}
 
 {
   DecodeFloat64Buffer
@@ -754,12 +791,12 @@ Function EncodeDouble(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedEx
   1 otherwise). When false, the integer bit is masked-out and is zero,
   irrespective of actual value.
 
-    NOTE - only lowest 53 bits of the mantissa are valid, other bits will
-           always be zero.
+    NOTE - only lowest 52 bits (53 with integer bit) of the mantissa are valid,
+           other bits will always be zero.
 }
 procedure DecodeFloat64Buffer(const Buffer; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
 procedure DecodeFloat64(const Value: Float64; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
-procedure DecodeDouble(const Value: Float64; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
+procedure DecodeDouble(const Value: Double; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);{$IFDEF CanInline} inline;{$ENDIF}
 
 implementation
 
@@ -767,6 +804,15 @@ implementation
   {$DEFINE FPCDWM}
   {$DEFINE W5024:={$WARN 5024 OFF}}   // Parameter "$1" not used
 {$ENDIF}
+
+// do not place this any higher
+{$IF SizeOf(Extended) = 8}
+  {$DEFINE Extended64}
+{$ELSEIF SizeOf(Extended) = 10}
+  {$UNDEF Extended64}
+{$ELSE}
+  {$MESSAGE FATAL 'Unsupported platform, type extended must be 8 or 10 bytes.'}
+{$IFEND}
 
 {===============================================================================
     Internal constants and types
@@ -798,6 +844,30 @@ const
 {-------------------------------------------------------------------------------
     Library-specific exceptions - FPU exceptions
 -------------------------------------------------------------------------------}
+
+constructor EF80UFPUException.CreateNoClear(const Msg: String{$IFNDEF FPC}; Dummy: Integer = 0{$ENDIF});
+begin
+inherited Create(Msg);
+fStatusWord := GetX87StatusWord;
+end;
+
+//------------------------------------------------------------------------------
+
+constructor EF80UFPUException.Create(const Msg: String);
+begin
+CreateNoClear(Msg);
+If EmulatedX87StatusWord then
+  ClearX87Exceptions;
+end;
+
+//------------------------------------------------------------------------------
+
+constructor EF80UFPUException.CreateDefMsgNoClear({$IFNDEF FPC}Dummy: Integer = 0{$ENDIF});
+begin
+CreateNoClear(DefaultMessage);
+end;
+
+//------------------------------------------------------------------------------
 
 constructor EF80UFPUException.CreateDefMsg;
 begin
@@ -1442,45 +1512,55 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure RaiseX87Exceptions(var StatusWord: UInt16);
+procedure RaiseX87Exceptions(var StatusWord: UInt16; Mask: Boolean = True; ConrolWord: UInt16 = 0);
 begin
-If (StatusWord and X87SW_EX_InvalidOP) <> 0 then
+If ((StatusWord and X87SW_EX_InvalidOP) <> 0) and (not Mask or ((ConrolWord and X87CW_EMASK_InvalidOP) = 0)) then
   begin
     StatusWord := StatusWord and not X87SW_EX_InvalidOP;
     If (StatusWord and X87SW_StackFault) <> 0 then
       begin
         If (StatusWord and X87SW_ConditionCode_C1) <> 0 then
-          raise EF80UStackOverflow.CreateDefMsg
+          raise EF80UStackOverflow.CreateDefMsgNoClear
         else
-          raise EF80UStackUnderflow.CreateDefMsg;
+          raise EF80UStackUnderflow.CreateDefMsgNoClear;
       end
-    else raise EF80UInvalidOp.CreateDefMsg;
+    else raise EF80UInvalidOp.CreateDefMsgNoClear;
   end;
-If (StatusWord and X87SW_EX_Denormal) <> 0 then
+If ((StatusWord and X87SW_EX_Denormal) <> 0) and (not Mask or ((ConrolWord and X87CW_EMASK_Denormal) = 0)) then
   begin
     StatusWord := StatusWord and not X87SW_EX_Denormal;
-    raise EF80UDenormal.CreateDefMsg;
+    raise EF80UDenormal.CreateDefMsgNoClear;
   end;
-If (StatusWord and X87SW_EX_DivByZero) <> 0 then
+If ((StatusWord and X87SW_EX_DivByZero) <> 0) and (not Mask or ((ConrolWord and X87CW_EMASK_DivByZero) = 0)) then
   begin
     StatusWord := StatusWord and not X87SW_EX_DivByZero;
-    raise EF80UDivByZero.CreateDefMsg;
+    raise EF80UDivByZero.CreateDefMsgNoClear;
   end;
-If (StatusWord and X87SW_EX_Overflow) <> 0 then
+If ((StatusWord and X87SW_EX_Overflow) <> 0) and (not Mask or ((ConrolWord and X87CW_EMASK_Overflow) = 0)) then
   begin
     StatusWord := StatusWord and not X87SW_EX_Overflow;
-    raise EF80UOverflow.CreateDefMsg;
+    raise EF80UOverflow.CreateDefMsgNoClear;
   end;
-If (StatusWord and X87SW_EX_Underflow) <> 0 then
+If ((StatusWord and X87SW_EX_Underflow) <> 0) and (not Mask or ((ConrolWord and X87CW_EMASK_Overflow) = 0)) then
   begin
     StatusWord := StatusWord and not X87SW_EX_Underflow;
-    raise EF80UUnderflow.CreateDefMsg;
+    raise EF80UUnderflow.CreateDefMsgNoClear;
   end;
-If (StatusWord and X87SW_EX_Precision) <> 0 then
+If ((StatusWord and X87SW_EX_Precision) <> 0) and (not Mask or ((ConrolWord and X87CW_EMASK_Precision) = 0)) then
   begin
     StatusWord := StatusWord and not X87SW_EX_Precision;
-    raise EF80UPrecision.CreateDefMsg;
+    raise EF80UPrecision.CreateDefMsgNoClear;
   end;
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+procedure RaiseX87Exceptions(Mask: Boolean = True);
+var
+  TempStatusWord: UInt16;
+begin
+TempStatusWord := GetX87StatusWord;
+RaiseX87Exceptions(TempStatusWord,Mask,GetX87ControlWord);
 end;
 
 
@@ -2346,8 +2426,7 @@ begin
   valid, but can be processed by x87 without raising an InvalidOP exception
   (they are silently converted to usual denormals or zero).
 }
-Result := not((((_Value.SignExponent and F80_MASK16_EXP) <> 0) and ((_Value.Mantissa and F80_MASK64_INTB) = 0)) or
-              (((_Value.SignExponent and F80_MASK16_EXP) = 0) and ((_Value.Mantissa and F80_MASK64_INTB) <> 0)));
+Result := not(((_Value.SignExponent and F80_MASK16_EXP) = 0) xor ((_Value.Mantissa and F80_MASK64_INTB) = 0));
 end;
 
 //------------------------------------------------------------------------------
@@ -2404,7 +2483,7 @@ var
 begin
 // exponent >0 and <max, integer bit 1, any fraction
 Result := (((_Value.SignExponent and F80_MASK16_EXP) > 0) and
-           ((_Value.SignExponent and F80_MASK16_EXP) <= F80_MASK16_EXP)) and
+           ((_Value.SignExponent and F80_MASK16_EXP) < F80_MASK16_EXP)) and
           ((_Value.Mantissa and F80_MASK64_INTB) <> 0);
 end;
 
@@ -2458,7 +2537,7 @@ var
 begin
 // exponent >0 and <max, integer bit 0, any fraction
 Result := (((_Value.SignExponent and F80_MASK16_EXP) > 0) and
-           ((_Value.SignExponent and F80_MASK16_EXP) <= F80_MASK16_EXP)) and
+           ((_Value.SignExponent and F80_MASK16_EXP) < F80_MASK16_EXP)) and
           ((_Value.Mantissa and F80_MASK64_INTB) = 0);
 end;
 
@@ -2481,7 +2560,7 @@ If IsValid(Value) then
       end
     else Result := 0;
   end
-else raise EF80UInvalidOp.CreateDefMsg;
+else raise EF80UInvalidOp.CreateDefMsgNoClear;
 end;
 
 //------------------------------------------------------------------------------
@@ -2496,7 +2575,7 @@ If IsValid(Value) then
     _Result.Mantissa := _Value.Mantissa;
     _Result.SignExponent := _Value.SignExponent and not F80_MASK16_SIGN;
   end
-else raise EF80UInvalidOp.CreateDefMsg;
+else raise EF80UInvalidOp.CreateDefMsgNoClear;
 end;
 
 //------------------------------------------------------------------------------
@@ -2511,16 +2590,16 @@ If IsValid(Value) then
     _Result.Mantissa := _Value.Mantissa;
     _Result.SignExponent := _Value.SignExponent xor F80_MASK16_SIGN;
   end
-else raise EF80UInvalidOp.CreateDefMsg;
+else raise EF80UInvalidOp.CreateDefMsgNoClear;
 end;
 
 {-------------------------------------------------------------------------------
     Utility routines - value encoding and decoding
 -------------------------------------------------------------------------------}
 
-Function MapToFloat80(High16: UInt16; Low64: UInt64): Float80;
+procedure MapToFloat80Buffer(out Buffer; High16: UInt16; Low64: UInt64);
 var
-  _Result:  TFloat80Overlay absolute Result;
+  _Result:  TFloat80Overlay absolute Buffer;
 begin
 _Result.Part_16 := High16;
 _Result.Part_64 := Low64;
@@ -2528,16 +2607,33 @@ end;
 
 //------------------------------------------------------------------------------
 
-Function MapToExtended(High16: UInt16; Low64: UInt64): Float80;
+Function MapToFloat80(High16: UInt16; Low64: UInt64): Float80;
 begin
-Result := MapToFloat80(High16,Low64);
+MapToFloat80Buffer(Result,High16,Low64);
 end;
 
 //------------------------------------------------------------------------------
 
-procedure MapFromFloat80(const Value: Float80; out High16: UInt16; out Low64: UInt64);
+Function MapToExtended(High16: UInt16; Low64: UInt64): Extended;
+{$IFDEF Extended64}
+// extended is 64bit
 var
-  _Value: TFloat80Overlay absolute Value;
+  F80Result:  Float80;
+begin
+MapToFloat80Buffer(F80Result,High16,Low64);
+Float80ToFloat64(@F80Result,@Result);
+{$ELSE}
+// extended is 80bit
+begin
+MapToFloat80Buffer(Result,High16,Low64);
+{$ENDIF}
+end;
+
+//------------------------------------------------------------------------------
+
+procedure MapFromFloat80Buffer(const Buffer; out High16: UInt16; out Low64: UInt64);
+var
+  _Value: TFloat80Overlay absolute Buffer;
 begin
 High16 := _Value.Part_16;
 Low64 := _Value.Part_64;
@@ -2545,9 +2641,24 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure MapFromExtended(const Value: Float80; out High16: UInt16; out Low64: UInt64);
+procedure MapFromFloat80(const Value: Float80; out High16: UInt16; out Low64: UInt64);
 begin
-MapFromExtended(Value,High16,Low64);
+MapFromFloat80Buffer(Value,High16,Low64);
+end;
+
+//------------------------------------------------------------------------------
+
+procedure MapFromExtended(const Value: Extended; out High16: UInt16; out Low64: UInt64);
+{$IFDEF Extended64}
+var
+  F80Value: Float80;
+begin
+Float64ToFloat80(@Value,@F80Value);
+MapFromFloat80Buffer(F80Value,High16,Low64);
+{$ELSE}
+begin
+MapFromFloat80Buffer(Value,High16,Low64);
+{$ENDIF}
 end;
 
 //==============================================================================
@@ -2600,9 +2711,18 @@ end;
 
 //------------------------------------------------------------------------------
 
-Function EncodeExtended(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Float80;
+Function EncodeExtended(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True): Extended;
+{$IFDEF Extended64}
+// extended is 64bit
+var
+  F80Result:  Float80;
+begin
+EncodeFloat80Buffer(F80Result,Mantissa,Exponent,Sign,BiasedExp,IntBit);
+Float80ToFloat64(@F80Result,@Result);
+{$ELSE}
 begin
 EncodeFloat80Buffer(Result,Mantissa,Exponent,Sign,BiasedExp,IntBit);
+{$ENDIF}
 end;
 
 //------------------------------------------------------------------------------
@@ -2631,41 +2751,63 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure DecodeExtended(const Value: Float80; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+procedure DecodeExtended(const Value: Extended; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+{$IFDEF Extended64}
+var
+  F80Value: Float80;
+begin
+Float64ToFloat80(@Value,@F80Value);
+DecodeFloat80Buffer(F80Value,Mantissa,Exponent,Sign,BiasedExp,IntBit);
+{$ELSE}
 begin
 DecodeFloat80Buffer(Value,Mantissa,Exponent,Sign,BiasedExp,IntBit);
+{$ENDIF}
 end;
 
 //==============================================================================
 
-Function MapToFloat64(Value: UInt64): Float64;
+procedure MapToFloat64Buffer(out Buffer; Value: UInt64);
 var
-  _Value: Float64 absolute Value;
+  _Result: Float64 absolute Buffer;
 begin
-Result := _Value;
+_Result := Value;
 end;
 
 //------------------------------------------------------------------------------
 
-Function MapToDouble(Value: UInt64): Float64;
+Function MapToFloat64(Value: UInt64): Float64;
 begin
-Result := MapToFloat64(Value);
+MapToFloat64Buffer(Result,Value);
+end;
+
+//------------------------------------------------------------------------------
+
+Function MapToDouble(Value: UInt64): Double;
+begin
+MapToFloat64Buffer(Result,Value);
+end;
+
+//------------------------------------------------------------------------------
+
+Function MapFromFloat64Buffer(const Buffer): UInt64;
+var
+  _Value: UInt64 absolute Buffer;
+begin
+Result := _Value;
 end;
 
 //------------------------------------------------------------------------------
 
 Function MapFromFloat64(const Value: Float64): UInt64;
-var
-  _Value: UInt64 absolute Value;
 begin
-Result := _Value;
+Result := MapFromFloat64Buffer(Value);
 end;
 
 //------------------------------------------------------------------------------
 
-Function MapFromDouble(const Value: Float64): UInt64;
+Function MapFromDouble(const Value: Double): UInt64;
 begin
-Result := MapFromFloat64(Value);
+Result := MapFromFloat64Buffer(Value);
 end;
 
 //==============================================================================
@@ -2692,7 +2834,7 @@ end;
 
 //------------------------------------------------------------------------------
 
-Function EncodeDouble(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False): Float64;
+Function EncodeDouble(Mantissa: UInt64; Exponent: Int16; Sign: Boolean; BiasedExp: Boolean = False): Double;
 begin
 EncodeFloat64Buffer(Result,Mantissa,Exponent,Sign,BiasedExp);
 end;
@@ -2727,7 +2869,7 @@ end;
 
 //------------------------------------------------------------------------------
 
-procedure DecodeDouble(const Value: Float64; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
+procedure DecodeDouble(const Value: Double; out Mantissa: UInt64; out Exponent: Int16; out Sign: Boolean; BiasedExp: Boolean = False; IntBit: Boolean = True);
 begin
 DecodeFloat64Buffer(Value,Mantissa,Exponent,Sign,BiasedExp,IntBit);
 end;
