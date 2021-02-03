@@ -44,9 +44,9 @@
       summary flag bit is not set both for masked and unmasked exceptions.
       Top of the stack, busy and stack fault flags are outright ignored.
 
-  Version 1.0.5 (2021-01-22)
+  Version 1.1 (2021-02-03)
 
-  Last change 2021-01-24
+  Last change 2021-02-03
 
   ©2020-2021 František Milt
 
@@ -1713,6 +1713,55 @@ begin
 Result := (Value.Low64 = 0) and ((Value.Bit65 and 1) = 0);
 end;
 
+//==============================================================================
+
+procedure SignalX87Exceptions(Exceptions: TX87Exceptions); overload;
+var
+  i:      TX87Exception;
+  Masks:  TX87Exceptions;
+begin
+SetX87ExceptionFlags(GetX87ExceptionFlags + Exceptions);
+Masks := GetX87ExceptionMasks;
+// note that stack exceptions are not observed
+For i := Low(TX87Exception) to High(TX87Exception) do
+  If (i in Exceptions) and not(i in Masks) then
+    case i of
+      excDenormal:  raise EF80UDenormal.CreateDefMsg;
+      excDivByZero: raise EF80UDivByZero.CreateDefMsg;
+      excOverflow:  raise EF80UOverflow.CreateDefMsg;
+      excUnderflow: raise EF80UUnderflow.CreateDefMsg;
+      excPrecision: raise EF80UPrecision.CreateDefMsg;
+    else
+     {excInvalidOp}
+      raise EF80UInvalidOP.CreateDefMsg;
+    end;
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+procedure SignalX87Exceptions(Exceptions: UInt32); overload;
+var
+  TempCW: UInt16;
+begin
+// faster implementation
+TempCW := GetX87ControlWord;
+{$IFDEF PurePascal}
+Pas_X87SW := GetX87StatusWord or Exceptions;
+{$ENDIF}
+If (Exceptions and X87SW_EX_InvalidOP <> 0) and (TempCW and X87CW_EMASK_InvalidOP = 0) then
+  raise EF80UInvalidOP.CreateDefMsg;
+If (Exceptions and X87SW_EX_Denormal <> 0) and (TempCW and X87CW_EMASK_Denormal = 0) then
+  raise EF80UDenormal.CreateDefMsg;
+If (Exceptions and X87SW_EX_DivByZero <> 0) and (TempCW and X87CW_EMASK_DivByZero = 0) then
+  raise EF80UDivByZero.CreateDefMsg;
+If (Exceptions and X87SW_EX_Overflow <> 0) and (TempCW and X87CW_EMASK_Overflow = 0) then
+  raise EF80UOverflow.CreateDefMsg;
+If (Exceptions and X87SW_EX_Underflow <> 0) and (TempCW and X87CW_EMASK_Underflow = 0) then
+  raise EF80UUnderflow.CreateDefMsg;
+If (Exceptions and X87SW_EX_Precision <> 0) and (TempCW and X87CW_EMASK_Precision = 0) then
+  raise EF80UPrecision.CreateDefMsg;
+end;
+
 {-------------------------------------------------------------------------------
     Conversion routines - Float64 -> Float80 conversion
 -------------------------------------------------------------------------------}
@@ -1760,21 +1809,17 @@ case Exponent of
   0:    If Mantissa <> 0 then
           begin
             // denormal
-            If GetX87ExceptionMask(excDenormal) then
-              begin
-                SetX87ExceptionFlag(excDenormal,True);
-              {
-                normalize...
+            SignalX87Exceptions(X87SW_EX_Denormal);
+          {
+            normalize...
 
-                ...shift mantissa left so that its highest set bit will be shifted
-                to integer bit (bit 63), also correct exponent to reflect this
-                change
-              }
-                MantissaShift := HighZeroCount(Mantissa);
-                BuildExtendedResult(UInt16(Sign shr 48) or UInt16(15372 - MantissaShift),
-                                    UInt64(Mantissa shl MantissaShift));
-              end
-            else raise EF80UDenormal.CreateDefMsg;
+            ...shift mantissa left so that its highest set bit will be shifted
+            to integer bit (bit 63), also correct exponent to reflect this
+            change
+          }
+            MantissaShift := HighZeroCount(Mantissa);
+            BuildExtendedResult(UInt16(Sign shr 48) or UInt16(15372 - MantissaShift),
+                                UInt64(Mantissa shl MantissaShift));
           end
         // return signed zero
         else BuildExtendedResult(UInt16(Sign shr 48),0);
@@ -1786,15 +1831,10 @@ case Exponent of
             If (Mantissa and F64_MASK_FHB) = 0 then
               begin
                 // signaled NaN
-                If GetX87ExceptionMask(excInvalidOp) then
-                  begin
-                    SetX87ExceptionFlag(excInvalidOp,True);
-                    // quiet signed NaN with mantissa
-                    BuildExtendedResult(UInt16(Sign shr 48) or F80_MASK16_EXP,
-                                        UInt64(Mantissa shl 11) or F80_MASK64_FHB or F80_MASK64_INTB)
-                  end
-                // signaling NaN
-                else raise EF80UInvalidOp.CreateDefMsg;
+                SignalX87Exceptions(X87SW_EX_InvalidOp);
+                // if no exception was raised, return quiet signed NaN with mantissa
+                BuildExtendedResult(UInt16(Sign shr 48) or F80_MASK16_EXP,
+                                    UInt64(Mantissa shl 11) or F80_MASK64_FHB or F80_MASK64_INTB)
               end
             // quiet signed NaN with mantissa
             else BuildExtendedResult(UInt16(Sign shr 48) or F80_MASK16_EXP,
@@ -1956,36 +1996,6 @@ var
     else Result := Value shr 11;
   end;
 
-  procedure ExceptionSetOrRaise(Exception: TX87Exception);
-  begin
-    If not GetX87ExceptionMask(Exception) then
-      case Exception of
-        excDenormal:  raise EF80UDenormal.CreateDefMsg;
-        excDivByZero: raise EF80UDivByZero.CreateDefMsg;
-        excOverflow:  raise EF80UOverflow.CreateDefMsg;
-        excUnderflow: raise EF80UUnderflow.CreateDefMsg;
-        excPrecision: raise EF80UPrecision.CreateDefMsg;
-      else
-       {excInvalidOp}
-        raise EF80UInvalidOP.CreateDefMsg;
-      end
-    else SetX87ExceptionFlag(Exception,True);
-  end;
-
-  Function DenormReportUnderflow: Boolean;
-  begin
-    case RoundMode of
-      rmNearest:
-        Result := (Mantissa and UInt64($C00)) <> UInt64($C00);
-      rmDown:
-        Result :=  ((Mantissa and UInt64($FFF)) <= UInt64($800)) or (Sign = 0);
-      rmUp:
-        Result := ((Mantissa and UInt64($FFF)) <= UInt64($800)) or (Sign <> 0);
-    else
-      Result := True;
-    end;
-  end;
-
 begin
 RoundMode := GetX87RoundingMode;
 Sign := UInt64(PFloat80Overlay(Float80Ptr)^.SignExponent and F80_MASK16_SIGN) shl 48;
@@ -1998,18 +2008,14 @@ If ((Exponent > 0) and (Exponent <= F80_MASK16_EXP)) and ((Mantissa and F80_MASK
     unnormals (seemingly normalized numbers, but with integer bit of 0),
     pseudo-infinities and pseudo-NaNs (both with integer bit 0)
   }
-    If GetX87ExceptionMask(excInvalidOP) then
-      begin
-        SetX87ExceptionFlag(excInvalidOP,True);
-      {
-        return negative QNaN (QNaN floating point indefinite)
+    SignalX87Exceptions(X87SW_EX_InvalidOp);
+  {
+    return negative QNaN (QNaN floating point indefinite)
 
-        the constants are casted to UInt64 because older FPC is throwing
-        nonsensical error without it
-      }
-        PUInt64(Float64Ptr)^ := UInt64(F64_MASK_SIGN or F64_MASK_EXP or F64_MASK_FHB);
-      end
-    else raise EF80UInvalidOP.CreateDefMsg;
+    the constants are casted to UInt64 because older FPC is throwing
+    nonsensical error without it
+  }
+    PUInt64(Float64Ptr)^ := UInt64(F64_MASK_SIGN or F64_MASK_EXP or F64_MASK_FHB);
   end
 else
   case Exponent of
@@ -2025,17 +2031,16 @@ else
                 Also note that X87 is not signaling denormal exception when
                 converting from extended precision numbers.
               }
+                // post-computation exceptions
+                SignalX87Exceptions(X87SW_EX_Underflow);
                 If ((RoundMode = rmUp) and (Sign = 0)) or
                    ((RoundMode = rmDown) and (Sign <> 0)) then
                   // return signed smallest representable number
-                  ResultTemp := Sign or UInt64(1)
+                  PUInt64(Float64Ptr)^ := Sign or UInt64(1)
                 else
                   // convert to signed zero
-                  ResultTemp := Sign;
-                // post-computation exceptions
-                ExceptionSetOrRaise(excUnderflow);
-                PUInt64(Float64Ptr)^ := ResultTemp;
-                ExceptionSetOrRaise(excPrecision);
+                  PUInt64(Float64Ptr)^ := Sign;
+                SignalX87Exceptions(X87SW_EX_Precision);
               end
             // mantissa of 0 - return signed zero
             else PUInt64(Float64Ptr)^ := Sign;
@@ -2046,17 +2051,16 @@ else
           }
     $1..
     $3BCB:  begin
+              // post-computation exceptions
+              SignalX87Exceptions(X87SW_EX_Underflow);
               If ((RoundMode = rmUp) and (Sign = 0)) or
                  ((RoundMode = rmDown) and (Sign <> 0)) then
                 // return signed smallest representable number
-                ResultTemp := Sign or UInt64(1)
+                PUInt64(Float64Ptr)^ := Sign or UInt64(1)
               else
                 // convert to signed zero
-                ResultTemp := Sign;
-              // post-computation exceptions
-              ExceptionSetOrRaise(excUnderflow);
-              PUInt64(Float64Ptr)^ := ResultTemp;
-              ExceptionSetOrRaise(excPrecision);
+                PUInt64(Float64Ptr)^ := Sign;
+              SignalX87Exceptions(X87SW_EX_Precision);
             end;
 
           {
@@ -2077,8 +2081,8 @@ else
             {
               post-computation exceptions
 
-              Note that, when underflow is masked, the underflow exception flag
-              is set only when the result is also inexact.
+              Note that, when underflow is masked, the underflow exception can
+              be signalled only when the result is also inexact.
             }
               If GetX87ExceptionMask(excUnderflow) then
                 begin
@@ -2086,230 +2090,40 @@ else
                   If BitsLost then
                     begin
                       // inexact result
-                      ExceptionSetOrRaise(excUnderflow);
+                      SignalX87Exceptions(X87SW_EX_Underflow);
                       PUInt64(Float64Ptr)^ := ResultTemp;
-                      ExceptionSetOrRaise(excPrecision);
+                      SignalX87Exceptions(X87SW_EX_Precision);
                     end
                   else PUInt64(Float64Ptr)^ := ResultTemp;
                 end
-              else raise EF80UUnderflow.CreateDefMsg;
+              else SignalX87Exceptions(X87SW_EX_Underflow);
             end;
 
           {
             exponent 15360 (-1023 unbiased) - similar to previous case, but
-            with much more complexities because it can yield a normalized number
-            as a result of denormalization (see further).
+            with more complexities because it can yield a normalized number
+            as a result of denormalization.
           }
     $3C00:  begin
-            {
-              denormalize
-
-              ShiftMantissaDenorm can, in this case, return mantissa with the
-              integer bit (bit 52) set.
-
-              This, when not masked, will create a result with biased exponent
-              of 1, as the integer bit is implicit in double-precision floats
-              and its place is occupied by lowest bit of the exponent. Simply
-              put - the mantissa will, thanks to rounding, overflow into
-              exponent, and a normalized value will be created.
-              
-              This is expected and, in fact, a desired behaviour, it just has
-              to be observed when raising exceptions.
-            }
-              ResultTemp := Sign or ShiftMantissaDenorm(Mantissa,12,BitsLost);
-            {
-              post-computation exceptions
-
-              Exception reporting in this case is somewhat complex...
-
-              Precision exception is simple - if the result cannot be fully
-              represented (ie. mantissa bits were lost either in coversion or
-              in gradual underflow), its flag will be set and, when not masked,
-              the exception raised.
-
-              Underflow exception, when masked, can only be set or raised when
-              the result is inexact. Whether it is masked or not, its raising/
-              setting is further complicated by the fact that sometimes, the
-              denormalization process yields a normalized value with zero
-              fraction, integer bit of 1 and biased exponent 1.
-              When result is a denormal, the underflow exception is always
-              reported.
-              When result is promoted to a normalized value...
-
-                This can only happen for exponent -1023 and mantissa with all
-                fraction bits above bit 11 set. Whether the underflow exception
-                is reported or not then depends on selected rounding mode, sign,
-                and mantissa bits 0..11:
-
-                  For rounding to nearest, the underflow is reported unless bits
-                  10 and 11 are BOTH set, then underflow is not reported.
-
-                  For rounding down, the condition changes depending on the bit
-                  11 in original mantissa.
-                  For positive numbers, undeflow is always reported.
-                  For negative numbers, when the bit is NOT set, then underflow
-                  is reported. When it is set, underflow is reported only when
-                  bits 0..10 are all zero.
-
-                  For rounding up, the condition again changes depending on bit
-                  11 in original mantissa.
-                  For positive numbers, when the bit is NOT set, then underflow
-                  is reported. When it is set, underflow is reported only when
-                  bits 0..10 are all zero.
-                  For negative numbers, underflow is always reported.
-
-                  For rounding to zero (truncate), the underflow is always
-                  reported.
-
-                These complexities stem from the process of conversion, where
-                the double-extended (64bit, explicit integer bit) mantissa is
-                first converted to a double-precision (53bit, implicit
-                integer bit) and then, if necessary, a gradual underflow is
-                applied to bring exponent to allowed range.
-
-                And since the gradual underflow is not performed here, we have
-                to do some post-computation checks to see whether to report
-                underflow exception or not. This is done by probing the
-                mentioned bits.
-
-                Let's do some examples (RM = rounding mode, S = sign,
-                M = mantissa, E = exponent, U = underflow exception raported,
-                P = precision exception reported):
-
-                  #1  RM = nearest, S = +
-
-                        M 1.111 1111 .. 1111 1011 1111 1111   E -1023
-
-                      conversion...
-
-                        M 1.111 1111 .. 1111 1                E -1023   U P
-
-                      gradual underflow...
-
-                        M 1.000 0000 .. 0000 0                E -1022   U P
-
-
-                      final reported exceptions: U P
-
-                  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --
-
-                  #2  RM = nearest, S = +
-
-                        M 1.111 1111 .. 1111 1100 0000 0000   E -1023
-
-                      conversion...
-
-                       M 10.000 0000 .. 0000 0                E -1023    P
-                        M 1.000 0000 .. 0000 0                E -1022    P
-
-                      gradual underflow...
-
-                        not needed
-
-                      final reported exceptions: P
-
-                  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --    
-
-                  #3  RM = nearest, S = +
-
-                        M 1.111 1111 .. 1111 1100 0000 0001   E -1023
-
-                      conversion...
-
-                       M 10.000 0000 .. 0000 0                E -1023    P
-                        M 1.000 0000 .. 0000 0                E -1022    P
-
-                      gradual underflow...
-
-                        not needed
-
-                      final reported exceptions: P
-
-                  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --    
-
-                  #4  RM = up, S = +
-
-                        M 1.111 1111 .. 1111 0111 1111 1111   E -1023
-
-                      conversion...
-
-                        M 1.111 1111 .. 1111 1                E -1023  U P
-
-                      gradual underflow...
-
-                        M 1.000 0000 .. 0000 0                E -1022  U P
-
-                      final reported exceptions: U P
-
-                  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --    
-
-                  #5  RM = up, S = +
-
-                        M 1.111 1111 .. 1111 1000 0000 0000   E -1023
-
-                      conversion...
-
-                        M 1.111 1111 .. 1111 1                E -1023  U
-
-                      gradual underflow...
-
-                        M 1.000 0000 .. 0000 0                E -1022  U P
-
-                      final reported exceptions: U P
-
-                  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --  --    
-
-                  #6  RM = up, S = +
-
-                        M 1.111 1111 .. 1111 1000 0000 0001   E -1023
-
-                      conversion...
-
-                       M 10.000 0000 .. 0000 0                E -1023    P
-                        M 1.000 0000 .. 0000 0                E -1022    P
-
-                      gradual underflow...
-
-                        not needed
-
-                      final reported exceptions: P
-            }
-              If GetX87ExceptionMask(excUnderflow) then
+              ResultTemp := ShiftMantissaDenorm(Mantissa,11,BitsLost);
+              If ResultTemp <> (F64_MASK_INTB shl 1) then
                 begin
-                  // underflow exception masked
-                  If BitsLost then
+                  // result still a denormal
+                  If GetX87ExceptionMask(excUnderflow) then
                     begin
-                      // inexact result
-                      If (ResultTemp and F64_MASK_EXP) <> 0 then
-                        begin
-                          // result promoted to a normalized value
-                          If DenormReportUnderflow then
-                            ExceptionSetOrRaise(excUnderflow);
-                        end
-                      // result is a denormal
-                      else ExceptionSetOrRaise(excUnderflow);
-                      PUInt64(Float64Ptr)^ := ResultTemp;
-                      ExceptionSetOrRaise(excPrecision);
+                      PUInt64(Float64Ptr)^ := Sign or ShiftMantissaDenorm(Mantissa,12,BitsLost);
+                      If BitsLost or ((ResultTemp and 1) <> 0) then
+                        SignalX87Exceptions(X87SW_EX_Underflow or X87SW_EX_Precision);
                     end
-                  else PUInt64(Float64Ptr)^ := ResultTemp;
+                  else SignalX87Exceptions(X87SW_EX_Underflow);
                 end
               else
                 begin
-                  // underflow exception not masked
-                  If (ResultTemp and F64_MASK_EXP) <> 0 then
-                    begin
-                      // result promoted to a normalized value
-                      If DenormReportUnderflow then
-                        raise EF80UUnderflow.CreateDefMsg;
-                    end
-                  // result is a denormal
-                  else raise EF80UUnderflow.CreateDefMsg;
-                  PUInt64(Float64Ptr)^ := ResultTemp;
-                  If BitsLost then
-                    // inexact result
-                    ExceptionSetOrRaise(excPrecision);
+                  // result promoted to a normalized number
+                  PUInt64(Float64Ptr)^ := Sign or F64_MASK_INTB;
+                  SignalX87Exceptions(X87SW_EX_Precision);
                 end;
-            end;
+             end;
 
           {
             exponent 17407..32766 (1024..16383 unbiased) - exponent too large
@@ -2317,18 +2131,17 @@ else
           }
     $43FF..
     $7FFE:  begin
+              // post-computation exceptions
+              SignalX87Exceptions(X87SW_EX_Overflow);
               If (RoundMode = rmTruncate) or
                  ((RoundMode = rmUp) and (Sign <> 0)) or
                  ((RoundMode = rmDown) and (Sign = 0)) then
                 // return signed largest representable number
-                ResultTemp := Sign or UInt64($7FEFFFFFFFFFFFFF)
+                PUInt64(Float64Ptr)^ := Sign or UInt64($7FEFFFFFFFFFFFFF)
               else
                 // convert to signed infinity
-                ResultTemp := Sign or F64_MASK_EXP;
-              // post-computation exceptions
-              ExceptionSetOrRaise(excOverflow);
-              PUInt64(Float64Ptr)^ := ResultTemp;
-              ExceptionSetOrRaise(excPrecision);
+                PUInt64(Float64Ptr)^ := Sign or F64_MASK_EXP;
+              SignalX87Exceptions(X87SW_EX_Precision);
             end;
 
           {
@@ -2341,14 +2154,9 @@ else
                 If (Mantissa and F80_MASK64_FHB) = 0 then
                   begin
                     // signaling NaN
-                    If GetX87ExceptionMask(excInvalidOP) then
-                      begin
-                        // return quiet signed NaN with truncated mantissa
-                        SetX87ExceptionFlag(excInvalidOP,True);
-                        PUInt64(Float64Ptr)^ := Sign or F64_MASK_EXP or F64_MASK_FHB or (Mantissa shr 11);
-                      end
-                    // singal NaN
-                    else raise EF80UInvalidOP.CreateDefMsg;
+                    SignalX87Exceptions(X87SW_EX_InvalidOP);
+                    // no exception, return quiet signed NaN with truncated mantissa
+                    PUInt64(Float64Ptr)^ := Sign or F64_MASK_EXP or F64_MASK_FHB or (Mantissa shr 11);
                   end
                 // quiet signed NaN with truncated mantissa
                 else PUInt64(Float64Ptr)^ := Sign or F64_MASK_EXP or F64_MASK_FHB or (Mantissa shr 11);
@@ -2366,17 +2174,14 @@ else
         ManOverflow := True;
       end
     else ManOverflow := False;
-    ResultTemp := Sign or
-                  ((UInt64(Exponent - 15360) shl 52) and F64_MASK_EXP) or
-                  (Mantissa and F64_MASK_FRAC);
     // post-computation exceptions
     If ManOverflow and (Exponent > 17406) then
       // number was converted to infinity
-      ExceptionSetOrRaise(excOverflow);
-    PUInt64(Float64Ptr)^ := ResultTemp;
+      SignalX87Exceptions(X87SW_EX_Overflow);
+    PUInt64(Float64Ptr)^ := Sign or ((UInt64(Exponent - 15360) shl 52) and F64_MASK_EXP) or (Mantissa and F64_MASK_FRAC);
     If BitsLost then
       // inexact result
-      ExceptionSetOrRaise(excPrecision);
+      SignalX87Exceptions(X87SW_EX_Precision);
   end;
 end;
 {$ENDIF}
