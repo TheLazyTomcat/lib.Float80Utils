@@ -46,9 +46,9 @@
 
   Version 1.1 (2021-02-03)
 
-  Last change 2021-02-03
+  Last change 2022-09-13
 
-  ©2020-2021 František Milt
+  ©2020-2022 František Milt
 
   Contacts:
     František Milt: frantisek.milt@gmail.com
@@ -128,10 +128,9 @@ type
 -------------------------------------------------------------------------------}
 type
   EF80UFPUException = class(EF80UException)
-  private
+  protected
     fControlWord: UInt16;
     fStatusWord:  UInt16;
-  protected
     Function DefaultMessage: String; virtual; abstract;
   public
     constructor CreateNoClear(const Msg: String{$IFNDEF FPC}; Dummy: Integer = 0{$ENDIF});
