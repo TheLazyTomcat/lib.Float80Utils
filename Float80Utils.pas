@@ -65,11 +65,11 @@
       github.com/TheLazyTomcat/Lib.Float80Utils
 
   Dependencies:
-   *AuxExceptions - github.com/TheLazyTomcat/Lib.AuxExceptions
+  * AuxExceptions - github.com/TheLazyTomcat/Lib.AuxExceptions
     AuxTypes      - github.com/TheLazyTomcat/Lib.AuxTypes
 
-  Library AuxExceptions is required only when rebasing local exception
-  classes (see symbol Float80Utils_UseAuxExceptions for details).
+  Library AuxExceptions is required only when rebasing local exception classes
+  (see symbol Float80Utils_UseAuxExceptions for details).
 
   Indirect dependencies:
     SimpleCPUID - github.com/TheLazyTomcat/Lib.SimpleCPUID
@@ -101,7 +101,7 @@ unit Float80Utils;
 }
 {$IF Defined(Float80Utils_UseAuxExceptions)}
   {$DEFINE UseAuxExceptions}
-{$IFEND}{$DEFINE UseAuxExceptions}
+{$IFEND}
 
 //------------------------------------------------------------------------------
 
